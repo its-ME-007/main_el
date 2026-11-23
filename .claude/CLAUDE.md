@@ -96,6 +96,19 @@ and shows everything in an interactive 3D interface.
     differ. Suspect; dT may be better taken from mean_time_loss.
   - Net is RIGHT-hand traffic (no `--lefthand` at netconvert); India drives on the left. Mirror-image
     approximation; fixing it means rebuild + recalibrate.
+- Noise floor (2026-11-23, Mac, `urban.noise`, micro, seeds 42,1,2,3,4, demand fixed): baseline mean time loss
+  194.2 s, sd 12.9 (6.7 %), range 173.7-209.3; seed 42 is the luckiest, so single seed-42 micro runs overstate harm.
+  Paired over 5 seeds: c22 dT -12.6 % +- 12.0 (real effect, worse, Braess, ~278 veh/h); c24 -1.4 +- 12.6 and c25
+  -4.0 +- 5.7 (within noise). 2 lanes/60 km/h variant (`CAND_LANES=2 CAND_KMH=60`, dirs `*_l2v60_*`): c24 +0.6 +- 11.2
+  (noise), c25 -6.6 +- 2.4 (real, worse). Usage stays ~40 veh/h either way. `urban.export` writes `noise.json`; the
+  UI shows it on candidate cards. Verdict rule: |mean| > 2 standard errors, n > 2.
+- Untagged speed fix (2026-11-23, `sim.py` `UNTAGGED_KMH`/`untagged_speeds`): the top "bottleneck" 238204954 was an
+  artefact; untagged tertiary got netconvert's 80 km/h, faster than the 60 km/h flyover, so ~714 veh/h of Bellary Rd
+  through traffic cut down the service road. Untagged ways now get the median tagged maxspeed of their type in this
+  net (res 30, sec 40, tert 50, trunk 60, links 30), as a 2nd netconvert pass (via --type-files, --ramps.guess
+  dropped 10 ramp edges). New baseline: flyover 3,241 veh/h, mean time loss 133 s, shortcut 135 veh, worst = flyover
+  loop 1422993566 merging into Bellary Rd. All earlier candidate/noise results are on the OLD baseline (archived in
+  data/hebbal/archive_v1_default_speeds/); rerun candidates -> evaluate -> noise. See HANDOVER.md.
 - SUMO 1.28.0 installed via winget at `C:\Program Files (x86)\SUMO\` (SUMO_HOME set machine-wide;
   shells opened before install may not see it or PATH). `traci` + `sumolib` in backend deps.
 

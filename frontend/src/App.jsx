@@ -28,6 +28,9 @@ const label = c => `Candidate c${String(c.meso?.cand ?? c.micro?.cand ?? '?').pa
 const short = c => label(c).replace('Candidate ', '')
 // the most trustworthy result for a candidate: the microsim check where it exists, else the meso screen
 const best = c => c.micro ?? c.meso
+// repeated-run result for the candidate as evaluated (the first, default variant), if urban.noise ran it
+const seedRun = c => c.noise?.[0]
+const seedTag = n => n.verdict !== 'real effect' ? ['', 'no effect'] : n.dT > 0 ? ['ok', 'better'] : ['fail', 'worse']
 
 export default function App() {
   const host = useRef(null), sceneRef = useRef(null), statsRef = useRef(null)
@@ -176,7 +179,7 @@ export default function App() {
           </div>
           {tab === 'chart' && <ResultsChart rows={chartRows} selKey={selKey} onSelect={select} onHover={hoverCand} />}
           {tab === 'ranking' && <>
-            <p className="muted small rank-note">Micro score where validated, otherwise the fast meso screen.{custom && ' Custom weights.'}</p>
+            <p className="muted small rank-note">Micro score where validated, otherwise the fast meso screen; tags show repeated-run results.{custom && ' Custom weights.'}</p>
             <ol className="ranking">
               {ranked.map(c => (
                 <li key={c.key} onClick={() => select(c.key)}
@@ -184,7 +187,10 @@ export default function App() {
                     onMouseEnter={() => hoverCand(c.key)} onMouseLeave={() => hoverCand(null)}
                     title={c.micro ? `meso ${signed(c.mesoScore)} · micro ${signed(c.microScore)}` : `meso ${signed(c.mesoScore)}`}>
                   <span className="rank">{c.rank}</span>
-                  <span className="name">{short(c)}{c.micro && (c.microScore > 0
+                  <span className="name">{short(c)}{seedRun(c)
+                    ? <em className={`tag ${seedTag(seedRun(c))[0]}`} title={`${seedRun(c).n} seeds, ${seedRun(c).sim}sim`}>
+                        {seedRun(c).n} seeds: {seedTag(seedRun(c))[1]}</em>
+                    : c.micro && (c.microScore > 0
                     ? <em className="tag ok">micro ✓</em> : <em className="tag fail">micro ✗</em>)}</span>
                   <span className="sbar"><span style={{
                     width: `${Math.min(100, 100 * Math.log10(1 + Math.abs(c.score)) / Math.log10(301))}%`,
@@ -317,10 +323,12 @@ function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
         {sim === 'meso' && c.micro && (microS > 0) !== (s > 0) && (
           <div className={`banner ${microS > 0 ? 'ok' : 'fail'}`}>
             {microS > 0 ? 'Confirmed' : 'Not confirmed'} by the detailed microsimulation: score {signed(microS, 2)},
-            delay {c.micro.dT > 0 ? `${fmt(c.micro.dT)} % lower` : `${fmt(-c.micro.dT)} % higher`}. Switch to microsim above for details.
+            delay {c.micro.dT > 0 ? `${fmt(c.micro.dT)} % lower` : `${fmt(-c.micro.dT)} % higher`}
+            {seedRun(c) ? ' in a single run; see the repeated runs below.' : '. Switch to microsim above for details.'}
           </div>
         )}
-        <p className="verdict">{verdict(best(c), scoreOf(best(c), w), !!c.micro)}</p>
+        <p className="verdict">{seedRun(c) ? seedVerdict(c.noise) : verdict(best(c), scoreOf(best(c), w), !!c.micro)}</p>
+        {c.noise.length > 0 && <SeedRuns runs={c.noise} />}
         <table className="kv">
           <tbody>
             <tr><th>Mean delay per trip</th><td>{fmt(base?.mean_time_loss)} s → <b>{fmt(rec.mean_time_loss)} s</b></td></tr>
@@ -353,6 +361,45 @@ function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
       </table>
     </div>
   )
+}
+
+const delayText = dT => dT > 0 ? `${fmt(dT)} % lower` : `${fmt(-dT)} % higher`
+
+// Over several seeds, so it outranks any single run. runs[0] = the road as evaluated; later = stronger variants.
+function seedVerdict(runs) {
+  const [n, ...bigger] = runs
+  const worse = bigger.filter(b => b.verdict === 'real effect' && b.dT < 0)
+  const braess = worse.length ? ` Built bigger (${worse[0].label}), it reliably makes traffic worse: delay ${delayText(worse[0].dT)} (Braess paradox).` : ''
+  if (n.verdict !== 'real effect')
+    return `No measurable effect: over ${n.n} seeds the change in delay (${signed(-n.dT)} %) is within the simulation's own run-to-run variation.${braess}`
+  if (n.dT > 0) return `Reliably reduces delay over ${n.n} seeds: ${delayText(n.dT)} on average.${braess}`
+  return `Reliably makes traffic worse over ${n.n} seeds: delay ${delayText(n.dT)} on average` +
+    (n.cand_vph > 150 ? `. The shortcut draws ${fmt(n.cand_vph, 0)} veh/h onto it and creates a new jam (Braess paradox).` : '.') + braess
+}
+
+function SeedRuns({ runs }) {
+  const b = runs[0].baseline
+  return <>
+    <h3>Repeated runs <span className="muted">({runs[0].n} seeds, {runs[0].sim}sim)</span></h3>
+    <table className="kv seeds">
+      <tbody>
+        {runs.map(n => {
+          const [cls, txt] = seedTag(n)
+          return (
+            <tr key={n.id}>
+              <th>{n.label}</th>
+              <td><b className={cls === 'ok' ? 'good' : cls === 'fail' ? 'bad' : ''}>delay {signed(-n.dT)} %</b>
+                <span className="muted"> ± {fmt(n.dT_sd)}</span> <em className={`tag ${cls}`}>{txt}</em>
+                <div className="muted small">range {signed(-n.dT_max)} to {signed(-n.dT_min)} % · {fmt(n.cand_vph, 0)} veh/h on it</div></td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+    <p className="muted small">Each seed changes only driver randomness; the demand is the same. With no new road the baseline
+      itself varies ±{fmt(100 * b.sd / b.mean_time_loss)} % ({fmt(b.min)}–{fmt(b.max)} s delay per trip), so a change counts as
+      real only if its average is more than 2 standard errors from zero. Positive = more delay.</p>
+  </>
 }
 
 function verdict(r, s, micro) {

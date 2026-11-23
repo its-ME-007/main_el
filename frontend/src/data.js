@@ -28,7 +28,7 @@ export async function loadAll() {
   const bbox = areas[AREA]?.bbox || BBOXES[AREA]
   if (!bbox) throw new Error(`area "${AREA}" has not been exported yet`)
   const empty = { type: 'FeatureCollection', features: [] }
-  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios, live] = await Promise.all([
+  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios, live, noise] = await Promise.all([
     getJSON('roads.geojson'),
     getJSON('buildings.geojson'),
     // zones = obstacles + kind (water/park/institutional); older exports only have obstacles.geojson
@@ -39,6 +39,8 @@ export async function loadAll() {
     optional(getJSON('edge_stats.json'), {}),
     optional(getJSON('scenarios.json'), {}),
     optional(getJSON('live_traffic.json'), null),
+    // repeated runs over several SUMO seeds (urban.noise), per candidate variant (1 lane 40 km/h, 2 lanes 60 km/h, ...)
+    optional(getJSON('noise.json'), {}),
   ])
 
   // Join scenario results to candidate geometry through (u, v), as the contract prefers.
@@ -50,11 +52,17 @@ export async function loadAll() {
     .filter(f => f.properties.status === 'selected')
     .map(f => {
       const key = candKey(f.properties.u, f.properties.v)
-      return { key, feature: f, props: f.properties, meso: meso.get(key), micro: micro.get(key) }
+      const c = { key, feature: f, props: f.properties, meso: meso.get(key), micro: micro.get(key) }
+      const num = c.meso?.cand ?? c.micro?.cand
+      // default variant first, then stronger ones; each entry = that variant's summary for this candidate
+      c.noise = Object.entries(noise).filter(([, v]) => v.cands?.[num])
+        .sort(([, a], [, b]) => a.lanes - b.lanes || a.kmh - b.kmh)
+        .map(([id, v]) => ({ id, label: v.label, sim: v.sim, seeds: v.seeds, baseline: v.baseline, ...v.cands[num] }))
+      return c
     })
   const others = candidates.features.filter(f => f.properties.status !== 'selected')
 
-  return { areas, bbox, roads, buildings, zones, construction, edgeStats, selected, others, live,
+  return { areas, bbox, roads, buildings, zones, construction, edgeStats, selected, others, live, noise,
            baseline: scenarios.baseline || {}, hasMicro: micro.size > 0, hasSim: Object.keys(edgeStats).length > 0 }
 }
 

@@ -8,6 +8,9 @@ Writes into data/<area>/:
                          so the UI can compare a candidate with the baseline of the same simulator
   scenarios.json         {"meso": scenarios.csv records, "micro": scenarios_micro.csv records,
                           "baseline": {"meso": {...}, "micro": {...}} totals (mean_time_loss, box_waiting, ...)}
+  noise.json             repeated runs from urban.noise: {variant: {label, sim, seeds, baseline: {mean_time_loss, sd,
+                         min, max}, cands: {cand: {n, dT, dT_sd, dT_min, dT_max, score, score_sd, cand_vph, verdict}}}}
+                         variant "" = the evaluated candidates (1 lane, 40 km/h); "l2v60" = 2 lanes, 60 km/h, ...
 
 Stats keep only edges that saw traffic (entered > 0); a missing edge means no vehicles.
 Usage: uv run python -m urban.export [area]   (default: hebbal)
@@ -101,7 +104,27 @@ def export(area="hebbal"):
     for m in sorted((d / "sim" / "scenarios").glob("base_*/metrics_*.json")):
         res["baseline"][m.parent.name.removeprefix("base_")] = json.loads(m.read_text())
     dump(res, d / "scenarios.json")
+    noise = noise_runs(d)
+    if noise:
+        dump(noise, d / "noise.json")
     write_areas()
+
+
+def noise_runs(d):
+    """Every noise_<sim>[_l<lanes>v<kmh>].csv with at least 2 seeds and a candidate (a single seed says nothing)."""
+    import re
+    from urban.noise import summary
+    out = {}
+    for f in sorted(d.glob("noise_*.csv")):
+        mt = re.fullmatch(r"noise_(meso|micro)(?:_l(\d+)v(\d+))?", f.stem)
+        df = pd.read_csv(f)
+        if not mt or df[df.run == "base"].seed.nunique() < 2 or (df.run == "base").all():
+            continue
+        lanes, kmh = (int(mt[2]), int(mt[3])) if mt[2] else (1, 40)
+        key = mt[1] + (f"_l{lanes}v{kmh}" if mt[2] else "")
+        out[key] = {"label": f"{lanes} lane{'s' if lanes > 1 else ''} each way, {kmh} km/h", "lanes": lanes, "kmh": kmh,
+                    **summary(df)}
+    return out
 
 
 def write_areas():

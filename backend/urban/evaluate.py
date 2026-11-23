@@ -22,7 +22,12 @@ import sumolib  # noqa: E402
 from urban.data import AREAS, DATA  # noqa: E402
 from urban.sim import DURATION, SEED, in_box, make_demand, run  # noqa: E402
 
-CAND_SPEED = 11.11   # m/s (40 km/h), 1 lane each way: a local connector, not an arterial
+# default: 40 km/h, 1 lane each way (a local connector, not an arterial). Override for stronger variants, e.g.
+# CAND_LANES=2 CAND_KMH=60 (urban.noise keeps each variant's runs and CSV apart via VARIANT).
+CAND_LANES = int(os.environ.get("CAND_LANES", 1))
+CAND_KMH = int(os.environ.get("CAND_KMH", 40))
+CAND_SPEED = CAND_KMH / 3.6   # m/s
+VARIANT = "" if (CAND_LANES, CAND_KMH) == (1, 40) else f"_l{CAND_LANES}v{CAND_KMH}"
 CAND_EDGES = ("cand_f", "cand_b")
 # S = w1 dT + w2 dQ + w3 dC - w4 L - w5 P   (idea.md §7). Units chosen so terms are comparable:
 #   dT % mean time loss saved, dQ % study-box queueing (edge waiting time) saved,
@@ -40,14 +45,14 @@ def scenario_net(base, cand, incoming, out):
     if cand is not None:
         edg = out / "cand.edg.xml"
         edg.write_text("<edges>" + "".join(
-            f'<edge id="{eid}" from="{a}" to="{b}" numLanes="1" speed="{CAND_SPEED}" name="candidate"/>'
+            f'<edge id="{eid}" from="{a}" to="{b}" numLanes="{CAND_LANES}" speed="{CAND_SPEED:.2f}" name="candidate"/>'
             for eid, a, b in ((CAND_EDGES[0], cand.u, cand.v), (CAND_EDGES[1], cand.v, cand.u))) + "</edges>")
         # a loaded .net.xml keeps its connections as-is, so nothing would turn INTO the new road: add them
         con = out / "cand.con.xml"
         con.write_text("<connections>" + "".join(
-            f'<connection from="{e}" to="{eid}" fromLane="0" toLane="0"/>'  # edge-level ones are ignored
+            f'<connection from="{e}" to="{eid}" fromLane="0" toLane="{k}"/>'  # edge-level ones are ignored
             for eid, j in ((CAND_EDGES[0], cand.u), (CAND_EDGES[1], cand.v))
-            for e in incoming[j]) + "</connections>")
+            for e in incoming[j] for k in range(CAND_LANES)) + "</connections>")
         cmd += ["--edge-files", str(edg), "--connection-files", str(con)]
     subprocess.run(cmd + ["-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
     return net

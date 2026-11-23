@@ -28,6 +28,32 @@ ARTERIAL = ("highway.motorway", "highway.trunk", "highway.primary")
 # In OSM that carriageway is the highway=trunk "Hebbal Flyover" (way 377832181, 3 lanes, 60 km/h); the other
 # "Hebbal Flyover"/"Flyover" ways are trunk_link loops/ramps (1-3 lanes, 30 km/h) and are not the surveyed road.
 FLYOVER_TARGET_VPH = 3225
+# Speeds for OSM ways WITHOUT a maxspeed tag. netconvert's typemap defaults are 80-100 km/h for tertiary/secondary/
+# trunk, faster than the 60 km/h flyover, so rerouting sent Bellary Rd through traffic down the unnamed tertiary
+# service road 238204954, which then jammed merging back. Values = median maxspeed that OSM mappers tagged on the same
+# road type in the Hebbal net (2026-11-23): residential 30 (228 tagged), secondary 40 (28), tertiary 50 (219),
+# trunk 60 (61), trunk_link 30 (10). Types with no tagged sample get the nearest analogue. Tagged ways keep their tag.
+UNTAGGED_KMH = {"trunk": 60, "primary": 50, "secondary": 40, "tertiary": 50, "unclassified": 30, "residential": 30,
+                "trunk_link": 30, "primary_link": 30, "secondary_link": 30, "tertiary_link": 30}
+
+
+def untagged_speeds(raw, net):
+    """Second netconvert pass: set UNTAGGED_KMH on edges still at their type's default speed (= no maxspeed tag; no
+    tagged value in this area equals a default). Done after building, not via --type-files, because --ramps.guess
+    depends on speeds and would otherwise change the topology (it dropped 10 ramp edges incl. the flyover segment)."""
+    import xml.etree.ElementTree as ET
+    dflt = {t.get("id"): float(t.get("speed")) for t in
+            ET.parse(SUMO_HOME / "data" / "typemap" / "osmNetconvert.typ.xml").getroot().iter("type")}
+    edges = []
+    for e in sumolib.net.readNet(str(raw)).getEdges():
+        kind = e.getType().removeprefix("highway.")
+        if kind in UNTAGGED_KMH and abs(e.getSpeed() - dflt.get(e.getType(), -1)) < 0.01:
+            edges.append(f'<edge id="{e.getID()}" speed="{UNTAGGED_KMH[kind] / 3.6:.2f}"/>')
+    edg = net.parent / "untagged_speeds.edg.xml"
+    edg.write_text("<edges>\n" + "\n".join(edges) + "\n</edges>\n")
+    subprocess.run([sumolib.checkBinary("netconvert"), "--sumo-net-file", str(raw), "--edge-files", str(edg),
+                    "-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
+    return len(edges)
 
 
 def is_flyover_main(nw, edge, bbox):
@@ -44,15 +70,18 @@ def flyover_flow(net, edges, bbox):
 def build_net(area):
     out = DATA / area / "sim"
     out.mkdir(exist_ok=True)
-    net = out / "net.net.xml"
+    net, raw = out / "net.net.xml", out / "raw.net.xml"
     subprocess.run([
-        sumolib.checkBinary("netconvert"), "--osm-files", str(DATA / area / "roads.osm"), "-o", str(net),
+        sumolib.checkBinary("netconvert"), "--osm-files", str(DATA / area / "roads.osm"), "-o", str(raw),
         "--geometry.remove", "--ramps.guess", "--junctions.join", "--roundabouts.guess",
         # real OSM highway=traffic_signals nodes; guess-signals/join merge signal clusters into one junction TLS
         "--tls.guess-signals", "--tls.join", "--tls.default-type", "actuated",
         "--remove-edges.isolated", "--keep-edges.components", "1",
         "--output.street-names", "--no-warnings",
     ], check=True)
+    n = untagged_speeds(raw, net)
+    raw.unlink()
+    print(f"untagged speed limits set on {n} edges")
     return net
 
 

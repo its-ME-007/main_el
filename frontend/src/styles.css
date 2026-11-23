@@ -198,3 +198,5 @@ details[open] > summary h2::before { transform: rotate(90deg); }
 .live-sum .kv th { width: 62%; font-size: 12.5px; }
 .live-sum .kv td { font-size: 12.5px; }
 .notice code { white-space: pre-wrap; word-break: break-all; }
+.kv.seeds th { width: 38%; }
+.kv.seeds td .small { margin-top: 2px; }
