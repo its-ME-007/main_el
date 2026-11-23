@@ -86,8 +86,11 @@ def export(area="hebbal"):
 
     sd = d / "scenario_stats"
     sd.mkdir(exist_ok=True)
-    if not (d / "scenarios.csv").exists():   # simulation not run yet: geometry only
-        print(f"  {area}: no scenarios.csv yet (run urban.evaluate); exported geometry only")
+    names = {"macro": ["scenarios_macro.csv"], "meso": ["scenarios_meso.csv", "scenarios.csv"],  # scenarios.csv: old
+             "micro": ["scenarios_micro.csv"]}
+    found = {k: next((d / n for n in ns if (d / n).exists()), None) for k, ns in names.items()}
+    if not any(found.values()):   # simulation not run yet: geometry only
+        print(f"  {area}: no scenarios_*.csv yet (run urban.evaluate); exported geometry only")
         write_areas()
         return
     for run in sorted((d / "sim" / "scenarios").glob("*/edges.xml")):
@@ -96,9 +99,9 @@ def export(area="hebbal"):
         dump(edge_stats(run), sd / f"{run.parent.name}.json")
 
     res = {}
-    for key, name in (("meso", "scenarios.csv"), ("micro", "scenarios_micro.csv")):
-        if (d / name).exists():
-            res[key] = pd.read_csv(d / name).round(3).to_dict(orient="records")
+    for key, f in found.items():
+        if f:
+            res[key] = pd.read_csv(f).round(3).to_dict(orient="records")
     # baseline totals per simulator, so the UI can show before/after numbers next to dT, dQ
     res["baseline"] = {}
     for m in sorted((d / "sim" / "scenarios").glob("base_*/metrics_*.json")):

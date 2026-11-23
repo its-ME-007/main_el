@@ -90,7 +90,48 @@ and shows everything in an interactive 3D interface.
     pressure). Only 3 score positive: c25 (+7.1, dT +5.7 %, 43 veh/h), c22 (+4.6, 286 veh/h, 114 m), c24 (+2.9,
     41 veh/h). Everything carrying 600+ veh/h is much worse (dT -10 to -80 %, Braess). The low-use positives sit
     inside the noise floor: c36-c39 with ~55 veh/h range from -5 to -17 %. c22 is the only plausible real gain.
-    The micro validation (c25, c22, c24) was killed for low memory during `base_micro`; not yet rerun.
+    Micro validation DONE 2026-11-23 (`scenarios_micro.csv`): base_micro mean travel 392 s, time loss 172.6 s,
+    13 teleports, 1,165 s/run. ALL THREE WORSE: c25 dT -14.0 % (41 veh/h), c24 -18.9 % (36 veh/h), c22 -26.7 %
+    (276 veh/h); teleports 25-44 vs 13. A 40 veh/h road cannot cost 14 % system-wide, so either noise (rerouting
+    chaos) or the new junction leg re-signs right-of-way at u/v for all traffic there. No candidate shows a real gain.
+- Phase 5 code (2026-11-23): `evaluate.py --workers P` (ProcessPoolExecutor, one scenario per task; `simulate` takes
+  incoming edge ids, not the net). `urban/parallel.py` benchmark (DURATION=900 meso, N=16, P=1,2,4,8, fresh
+  `sim/bench/p{P}/`, checks results identical to sequential) -> `parallel.csv`. Not yet run. Machine: 16 cores /
+  24 threads, 15.7 GB RAM. Never run two sims at once: `make_demand` rewrites the shared route files in `sim/`.
+  - NOISE FLOOR (2026-11-23, `evaluate.py --noise 6 --workers 2`, `noise_meso.csv`): meso baseline, same demand,
+    SUMO seeds 42-47. Mean time loss 141.4 / 151.5 / 144.7 / 155.3 / 158.2 / 171.3 s: std 7.6 % in dT, 19.4 % in
+    dQ. Seed 42 (the baseline every candidate was compared to) is the LUCKIEST draw, about 8 % below the seed mean,
+    so single-seed candidates look systematically worse. Every meso positive (max +5.7 %) and the micro -14..-19 %
+    on ~40 veh/h roads are inside noise. Only the big Braess losses (-30 % and worse, 600+ veh/h) are real.
+    Detecting a 3 % effect at this variance needs ~40 seeds per scenario: single-seed ranking is meaningless.
+    2 workers ran ~480-540 s per meso run.
+    Rerouting is NOT the noise source (2026-11-23, `REROUTE=0 ... --noise 6`, `noise_meso_no_reroute.csv`): with
+    free-flow routes only, std got WORSE (dT 8.5 %, dQ 47.6 %), 34-59 teleports, only 8,361-9,231 of 9,252 arrived
+    (gridlock), 1,000-2,000 s per run. Likely cause (unproven): the network runs near capacity (flyover calibrated
+    to its survey flow), so small random differences grow into different queues. Note mean_time_loss counts arrived
+    vehicles only, so a run with more stuck vehicles can look better.
+  - USER DECISION 2026-11-23: model traffic as a stream. Screening = MACRO static assignment, `sim.assign()` =
+    SUMO `marouter --assignment-method UE`, deterministic (repeat runs byte-identical), ~2 min/scenario (only 31 s is
+    routing). `evaluate.py` default `--screen macro` (meso still via `--screen meso`), `--micro K` default 0.
+    Results `scenarios_macro.csv`; old meso screen renamed `scenarios_meso.csv`. Per-edge `netload.xml` kept in each
+    scenario dir (for the 3D heatmap). Macro metrics: delay per edge = q * tt * (1 - speedRelative); mean_time_loss
+    = total delay / vehicles. Macro baseline: mean travel 651 s (vs micro 392), flyover way 377832181 carries
+    2,691 veh/h (target 3,225) at v/c 112 % and 21 % of limit (~13 km/h, observed 15-20). Only 23 of 6,281 loaded
+    edges are over capacity, worst = arterial ENTRY edges (4,052 veh/h, v/c 169 %): demand exceeds entry capacity,
+    same in every scenario, so it inflates the baseline and dilutes dT %. marouter capacity ~800 veh/h/lane on the
+    flyover vs survey 1,100. Smoke test: c00/c01 dT +3.0/+2.4 % system-wide but dQ -46/-55 % (1,500-1,700 veh/h
+    pulled into the box).
+  - MACRO SCREEN COMPLETE 2026-11-23 (40 candidates, 4 workers, median 162 s/run vs ~120 s alone). Clear trade-off,
+    no noise: dT vs candidate flow corr +0.72, dQ vs flow -0.92. Big shortcuts (c02/c08/c33/c09/c13, 1,900-2,500
+    veh/h) cut network delay 6.4-7.5 % but add ~40 % box delay (through traffic diverted onto local streets).
+    Only 13/40 improve both. Winners: c23/c22/c21 (all from junction 2408528584, 108-126 m, ~430 veh/h):
+    dT +1.1 %, dQ +3.0 %, score 2.3-2.9. c22 was also the meso screen's only plausible gain. Next tier c24/c25/c03/c04
+    (~60 veh/h): dT +0.2 %, dQ +1.6 %.
+  - Merge 2026-11-23 (branch `feat/macro` on top of PR #1): `evaluate.py --noise` removed, use `urban.noise`
+    (paired multi-seed). `simulate(..., mode, seed)` takes "macro"|"meso"|"micro" (noise.py updated). export.py
+    reads scenarios_<macro|meso|micro>.csv and adds a "macro" key; the UI still reads "meso" (switching it to macro
+    is a frontend task). export's per-scenario heatmap stats read edges.xml only, not macro netload.xml (TODO).
+    ALL macro/meso numbers above are on the OLD net (before the untagged-speed fix below).
   - OPEN: c03/c04 carry about 25 veh/h yet show dT -3.4 %, so the meso noise floor from rerouting chaos is a few %.
     Consider multiple seeds. c02/c07 report a mean duration identical to baseline (357.97) while timeLoss/routeLength
     differ. Suspect; dT may be better taken from mean_time_loss.

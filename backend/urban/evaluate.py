@@ -1,11 +1,12 @@
 """Phase 4: add each selected candidate road to the network, simulate, compare with the baseline, score, rank.
 
-Screening uses mesosim (3.9x faster than micro, moderate ranking agreement), then the top `--micro K` candidates
-are re-run with microsim to validate. Reads data/<area>/candidates.geojson (urban.candidates).
-Writes data/<area>/scenarios.csv (meso) and scenarios_micro.csv; per-scenario outputs in sim/scenarios/.
+Screening uses macro (marouter static assignment: deterministic, ~2 min) by default, or meso (`--screen meso`:
+~500 s and seed noise of 7.6 % std in dT, larger than most candidate effects). The top `--micro K` candidates are
+re-run with microsim as a sanity check. Reads data/<area>/candidates.geojson (urban.candidates).
+Writes data/<area>/scenarios_<macro|meso>.csv and scenarios_micro.csv; per-scenario outputs in sim/scenarios/.
 
-Usage: uv run python -m urban.evaluate [area] [--limit N] [--micro K] [--workers P]
-       (default: hebbal, all selected, K=3, P=1 = sequential)
+Usage: uv run python -m urban.evaluate [area] [--limit N] [--screen macro|meso] [--micro K] [--workers P]
+       (default: hebbal, all selected, macro, K=0, P=1 = sequential)
 """
 import json
 import os
@@ -20,7 +21,7 @@ import pandas as pd  # noqa: E402
 import sumolib  # noqa: E402
 
 from urban.data import AREAS, DATA  # noqa: E402
-from urban.sim import DURATION, SEED, in_box, make_demand, run  # noqa: E402
+from urban.sim import DURATION, SEED, assign, in_box, make_demand, run  # noqa: E402
 
 # default: 40 km/h, 1 lane each way (a local connector, not an arterial). Override for stronger variants, e.g.
 # CAND_LANES=2 CAND_KMH=60 (urban.noise keeps each variant's runs and CSV apart via VARIANT).
@@ -58,17 +59,17 @@ def scenario_net(base, cand, incoming, out):
     return net
 
 
-def simulate(base, routes, box, cand, incoming, out, meso, seed=SEED):
-    """One scenario, self-contained (picklable args only), so it can run in a worker process.
-    seed = SUMO's random seed (driver behaviour); the demand files stay the same (urban.noise varies it)."""
+def simulate(base, routes, box, cand, incoming, out, mode, seed=SEED):
+    """mode = macro | meso | micro. One scenario, self-contained (picklable args only), so it can run in a worker
+    process. seed = SUMO's random seed (driver behaviour); the demand files stay the same (urban.noise varies it)."""
     done = out / f"metrics_{DURATION}.json"   # checkpoint: a killed sweep resumes where it stopped
     if done.exists():
         return json.loads(done.read_text())
     t0 = time.perf_counter()
     net = scenario_net(base, cand, incoming, out)
-    m, edges = run(net, routes, out, seed=seed, meso=meso)
+    m, edges = assign(net, routes, out) if mode == "macro" else run(net, routes, out, seed=seed, meso=mode == "meso")
     net.unlink()           # 30 MB per scenario; rebuild from cand.edg.xml if needed
-    (out / "tripinfo.xml").unlink()
+    (out / "tripinfo.xml").unlink(missing_ok=True)
     m["box_waiting"] = sum(s["waiting"] for eid, s in edges.items() if eid in box)
     m["cand_vph"] = sum(edges.get(e, {}).get("entered", 0) for e in CAND_EDGES) * 3600 / DURATION
     m["seconds"] = time.perf_counter() - t0
@@ -111,12 +112,12 @@ def setup(area):
     return d, base, routes, box, cands, incoming
 
 
-def sweep(env, rows, meso, root, workers=1, quiet=False):
+def sweep(env, rows, mode, root, workers=1, quiet=False):
     """Baseline + every candidate in rows. Returns (baseline metrics, DataFrame ranked by score)."""
     d, base, routes, box, _, incoming = env
-    tag = "meso" if meso else "micro"
-    jobs = [(base, routes, box, None, incoming, root / f"base_{tag}", meso)]
-    jobs += [(base, routes, box, c, incoming, root / f"c{i:02d}_{tag}", meso) for i, c in rows.iterrows()]
+    tag = mode
+    jobs = [(base, routes, box, None, incoming, root / f"base_{tag}", mode)]
+    jobs += [(base, routes, box, c, incoming, root / f"c{i:02d}_{tag}", mode) for i, c in rows.iterrows()]
     res = run_all(jobs, workers)
     b = next(res)
     quiet or print(f"[{tag}] baseline: mean travel {b['mean_travel_time']:.1f} s, {b['seconds'] or 0:.0f} s")
@@ -129,28 +130,30 @@ def sweep(env, rows, meso, root, workers=1, quiet=False):
     return b, pd.DataFrame(out).sort_values("score", ascending=False)
 
 
-def evaluate(area="hebbal", limit=None, micro=3, workers=1):
+def evaluate(area="hebbal", limit=None, micro=0, workers=1, screen="macro"):
     env = setup(area)
     d, cands, root = env[0], env[4].head(limit), env[0] / "sim" / "scenarios"
-    b_meso, meso_df = sweep(env, cands, True, root, workers)
-    meso_df.to_csv(d / "scenarios.csv", index=False)
+    b, screen_df = sweep(env, cands, screen, root, workers)
+    screen_df.to_csv(d / f"scenarios_{screen}.csv", index=False)
     micro_df = None
     if micro:
-        _, micro_df = sweep(env, cands.loc[meso_df.cand.head(micro)], False, root, workers)
+        _, micro_df = sweep(env, cands.loc[screen_df.cand.head(micro)], "micro", root, workers)
         micro_df.to_csv(d / "scenarios_micro.csv", index=False)
-    return b_meso, meso_df, micro_df
+    return b, screen_df, micro_df
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     opt = lambda k, dflt: int(args[args.index(k) + 1]) if k in args else dflt
     area = next((a for a in args if a in AREAS), "hebbal")
-    b, meso_df, micro_df = evaluate(area, limit=opt("--limit", None), micro=opt("--micro", 3), workers=opt("--workers", 1))
+    screen = args[args.index("--screen") + 1] if "--screen" in args else "macro"
+    b, meso_df, micro_df = evaluate(area, limit=opt("--limit", None), micro=opt("--micro", 0),
+                                    workers=opt("--workers", 1), screen=screen)
     assert len(meso_df) and (meso_df.arrived > 0).all(), "a scenario produced no traffic"
     assert meso_df.score.is_monotonic_decreasing
     print(f"\nused at all: {(meso_df.cand_vph > 0).sum()}/{len(meso_df)} candidates; "
           f"improve travel time: {(meso_df.dT > 0).sum()}")
     cols = ["cand", "u", "v", "L", "P", "dT", "dQ", "dC", "cand_vph", "teleports", "score"]
-    print("\nmeso ranking:\n" + meso_df[cols].head(10).round(2).to_string(index=False))
+    print(f"\n{screen} ranking:\n" + meso_df[cols].head(10).round(2).to_string(index=False))
     if micro_df is not None:
         print("\nmicro validation:\n" + micro_df[cols].round(2).to_string(index=False))

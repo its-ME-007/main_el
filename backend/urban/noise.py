@@ -39,9 +39,9 @@ def noise(area="hebbal", seeds=(42, 1, 2, 3, 4), cands=(), meso=False, workers=2
     sim = "meso" if meso else "micro"
     jobs, keys = [], []
     for s in seeds:
-        jobs.append((base, routes, box, None, incoming, run_dir(d, "base", sim, s), meso, s)); keys.append(("base", s))
+        jobs.append((base, routes, box, None, incoming, run_dir(d, "base", sim, s), sim, s)); keys.append(("base", s))
         for i in cands:
-            jobs.append((base, routes, box, rows.loc[i], incoming, run_dir(d, f"c{i:02d}", sim, s), meso, s))
+            jobs.append((base, routes, box, rows.loc[i], incoming, run_dir(d, f"c{i:02d}", sim, s), sim, s))
             keys.append((i, s))
     res = dict(zip(keys, run_all(jobs, workers)))
 

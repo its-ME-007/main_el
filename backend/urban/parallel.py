@@ -1,8 +1,8 @@
 """Phase 5: sequential vs parallel scenario evaluation. Speedup S = Ts / Tp, efficiency E = S / P (idea.md §8).
 
-Runs the same meso sweep (baseline + N candidates) with P = 1 (sequential) and each P in --workers, every time in a
+Runs the same sweep (MODE=macro default, or MODE=meso) (baseline + N candidates) with P = 1 (sequential) and each P in --workers, every time in a
 fresh directory so no checkpoint is reused, then checks the parallel results equal the sequential ones.
-DURATION defaults to 900 s here (39 s per meso run) so a full benchmark fits in ~30 min.
+Macro: full hour, ~2 min per scenario. MODE=meso: DURATION defaults to 900 s (39 s per run).
 Writes data/<area>/parallel.csv.
 
 Usage: uv run python -m urban.parallel [area] [--n N] [--workers 2,4,8]   (default: hebbal, N=16)
@@ -12,12 +12,13 @@ import shutil
 import sys
 import time
 
-os.environ.setdefault("DURATION", "900")
+MODE = os.environ.get("MODE", "macro")   # macro (deterministic, ~2 min, full hour) or meso
+if MODE == "meso":
+    os.environ.setdefault("DURATION", "900")   # 39 s per meso run; macro keeps the full calibrated hour
 import pandas as pd  # noqa: E402
 
 from urban.data import AREAS  # noqa: E402
 from urban.evaluate import sweep, setup  # noqa: E402
-
 COMPARE = ["cand", "arrived", "teleports", "mean_time_loss", "box_waiting", "cand_vph", "score"]
 
 
@@ -29,7 +30,7 @@ def bench(area="hebbal", n=16, workers=(2, 4, 8)):
         root = d / "sim" / "bench" / f"p{p}"
         shutil.rmtree(root, ignore_errors=True)
         t0 = time.perf_counter()
-        b, df = sweep(env, rows, True, root, workers=p, quiet=True)
+        b, df = sweep(env, rows, MODE, root, workers=p, quiet=True)
         wall = time.perf_counter() - t0
         busy = b["seconds"] + df.seconds.sum()   # summed per-scenario run time (netconvert + sumo)
         df = df.sort_values("cand").reset_index(drop=True)

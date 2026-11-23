@@ -15,6 +15,7 @@ from urban.data import AREAS, DATA  # noqa: E402
 SUMO_HOME = Path(os.environ["SUMO_HOME"])
 SEED = 42            # same seed -> same demand for baseline and every candidate
 DURATION = int(os.environ.get("DURATION", 3600))  # s of departures; 900 is enough for calibration sweeps
+REROUTE = os.environ.get("REROUTE", "1") != "0"   # REROUTE=0: keep free-flow routes (noise-source test)
 # Calibration knobs (override via env for sweeps). Through traffic = flows between arterial boundary edges,
 # split by whether the pair's free-flow route uses the Hebbal flyover, so the flyover can be loaded to
 # its surveyed volume without inflating every other road.
@@ -140,7 +141,7 @@ def run(net, routes, out, seed=SEED, meso=False):
         sumolib.checkBinary("sumo"), "-n", str(net), "-r", ",".join(map(str, routes)), "-a", str(add),
         "--tripinfo-output", str(out / "tripinfo.xml"), "--statistic-output", str(out / "stats.xml"),
         "--seed", str(seed), "--ignore-route-errors",
-        "--device.rerouting.probability", "1", "--device.rerouting.period", "60",  # drivers adapt to congestion
+        "--device.rerouting.probability", "1" if REROUTE else "0", "--device.rerouting.period", "60",  # adapt to congestion
         "--time-to-teleport", "300", "--end", str(DURATION * 2),
         "--no-step-log", "--no-warnings", "--duration-log.statistics", "false",
         *(MESO if meso else []),
@@ -166,6 +167,33 @@ def run(net, routes, out, seed=SEED, meso=False):
             edges[e.id] = {"speed": float(e.speed), "time_loss": float(e.timeLoss or 0), "entered": float(e.entered or 0),
                            "waiting": float(e.waitingTime or 0), "occupancy": float(e.occupancy or 0)}
     return metrics, edges
+
+
+def assign(net, routes, out):
+    """Macroscopic static assignment (SUMO marouter, user equilibrium): traffic as flows, deterministic (no seed
+    noise; identical inputs give byte-identical output), ~2 min. No queues spilling back, no signal timing: delay
+    comes from marouter's volume/capacity travel-time function. Returns (metrics, edges) shaped like run();
+    an edge's "waiting" is its delay in veh*s (flow x (travel time - free-flow time)), "entered" is veh per hour."""
+    out.mkdir(parents=True, exist_ok=True)
+    load = out / "netload.xml"
+    subprocess.run([
+        sumolib.checkBinary("marouter"), "-n", str(net), "-r", ",".join(map(str, routes)),
+        "--assignment-method", "UE", "--netload-output", str(load), "-o", os.devnull,
+        "--ignore-errors", "--no-warnings",
+    ], check=True, stdout=subprocess.DEVNULL)
+    edges, total_tt = {}, 0.0
+    for e in sumolib.xml.parse(str(load), "edge"):
+        q, tt, rel = float(e.entered), float(e.traveltime), float(e.speedRelative)  # entered = veh over the demand period
+        delay = q * tt * (1 - rel)   # speedRelative = free-flow time / travel time
+        total_tt += q * tt
+        edges[e.id] = {"speed": float(e.speed), "time_loss": delay, "entered": q,
+                       "waiting": delay, "occupancy": float(e.flowCapacityRatio)}  # v/c in % (not occupancy)
+    # netload.xml kept (1.5 MB): per-edge flow / travel time / v/c for the 3D heatmap
+    veh = sum(1 for _ in sumolib.xml.parse(str(routes[1]), "trip")) + sum(
+        float(f.vehsPerHour) * DURATION / 3600 for f in sumolib.xml.parse(str(routes[0]), "flow"))
+    total_delay = sum(s["time_loss"] for s in edges.values())
+    return {"loaded": veh, "inserted": veh, "arrived": veh, "teleports": 0, "mean_travel_time": total_tt / veh,
+            "total_travel_time": total_tt, "mean_time_loss": total_delay / veh}, edges
 
 
 def bottlenecks(net, edges, bbox, k=10):
