@@ -78,10 +78,15 @@ def export(area="hebbal"):
     nw = sumolib.net.readNet(str(d / "sim" / "net.net.xml"))
     dump(roads(nw, AREAS[area]), d / "roads.geojson")
     dump(zones(area), d / "zones.geojson")
-    dump(edge_stats(d / "sim" / "baseline" / "edges.xml"), d / "edge_stats.json")
+    if (d / "sim" / "baseline" / "edges.xml").exists():
+        dump(edge_stats(d / "sim" / "baseline" / "edges.xml"), d / "edge_stats.json")
 
     sd = d / "scenario_stats"
     sd.mkdir(exist_ok=True)
+    if not (d / "scenarios.csv").exists():   # simulation not run yet: geometry only
+        print(f"  {area}: no scenarios.csv yet (run urban.evaluate); exported geometry only")
+        write_areas()
+        return
     for run in sorted((d / "sim" / "scenarios").glob("*/edges.xml")):
         if not any(run.parent.glob("metrics_*.json")):  # still running: edges.xml is half-written
             continue
@@ -96,6 +101,18 @@ def export(area="hebbal"):
     for m in sorted((d / "sim" / "scenarios").glob("base_*/metrics_*.json")):
         res["baseline"][m.parent.name.removeprefix("base_")] = json.loads(m.read_text())
     dump(res, d / "scenarios.json")
+    write_areas()
+
+
+def write_areas():
+    """data/areas.json: every area with frontend exports, for the UI's area picker."""
+    out = {}
+    for a, bbox in AREAS.items():
+        d = DATA / a
+        if (d / "roads.geojson").exists():
+            out[a] = {"bbox": bbox, "scenarios": (d / "scenarios.json").exists(),
+                      "micro": (d / "scenarios_micro.csv").exists(), "live": (d / "live_traffic.json").exists()}
+    dump(out, DATA / "areas.json")
 
 
 if __name__ == "__main__":
