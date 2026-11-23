@@ -20,7 +20,7 @@ import pandas as pd  # noqa: E402
 import sumolib  # noqa: E402
 
 from urban.data import AREAS, DATA  # noqa: E402
-from urban.sim import DURATION, in_box, make_demand, run  # noqa: E402
+from urban.sim import DURATION, SEED, in_box, make_demand, run  # noqa: E402
 
 CAND_SPEED = 11.11   # m/s (40 km/h), 1 lane each way: a local connector, not an arterial
 CAND_EDGES = ("cand_f", "cand_b")
@@ -53,14 +53,15 @@ def scenario_net(base, cand, incoming, out):
     return net
 
 
-def simulate(base, routes, box, cand, incoming, out, meso):
-    """One scenario, self-contained (picklable args only), so it can run in a worker process."""
+def simulate(base, routes, box, cand, incoming, out, meso, seed=SEED):
+    """One scenario, self-contained (picklable args only), so it can run in a worker process.
+    seed = SUMO's random seed (driver behaviour); the demand files stay the same (urban.noise varies it)."""
     done = out / f"metrics_{DURATION}.json"   # checkpoint: a killed sweep resumes where it stopped
     if done.exists():
         return json.loads(done.read_text())
     t0 = time.perf_counter()
     net = scenario_net(base, cand, incoming, out)
-    m, edges = run(net, routes, out, meso=meso)
+    m, edges = run(net, routes, out, seed=seed, meso=meso)
     net.unlink()           # 30 MB per scenario; rebuild from cand.edg.xml if needed
     (out / "tripinfo.xml").unlink()
     m["box_waiting"] = sum(s["waiting"] for eid, s in edges.items() if eid in box)

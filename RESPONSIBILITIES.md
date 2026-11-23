@@ -38,8 +38,13 @@ rewrite is needed. All geometry is WGS84 (EPSG:4326). Files live in `backend/dat
 | `candidates.geojson` | yes | candidate lines: `status`, `u`, `v`, `length_m`, `net_dist`, `detour`, `buildings_hit`, `road_crossings`, `worksite_crossings`, `prescore` |
 | `scenarios.csv` | yes | meso ranking: `cand`, `u`, `v`, `dT`, `dQ`, `dC`, `L`, `P`, `score`, `cand_vph`, `teleports`, ... |
 | `scenarios_micro.csv` | after validation | same columns, microsim validation of the top K |
-| `roads.geojson` | TODO (A) | road lines with SUMO edge id, name, highway type, lanes, speed limit |
-| `edge_stats.json` | TODO (A) | `{edge_id: {speed, time_loss, entered, waiting, occupancy}}` from baseline `edges.xml` |
+| `roads.geojson` | yes (`urban.export`) | road lines: `id` (SUMO edge), `name`, `type`, `lanes`, `speed` (m/s), `length` (m), `in_box` |
+| `edge_stats.json` | yes (`urban.export`) | `{edge_id: {speed, speed_rel, time_loss, entered, waiting, occupancy}}` from the micro baseline `edges.xml`; only edges with traffic |
+| `scenario_stats/<run>.json` | yes (`urban.export`) | same schema per evaluated run: `base_meso`, `base_micro`, `c22_meso`, `c22_micro`, ... Compare a candidate only with the baseline of the same simulator |
+| `scenarios.json` | yes (`urban.export`) | `{meso: [...], micro: [...], baseline: {meso: {...}, micro: {...}}}`: the two CSVs as records plus baseline totals |
+
+Run `cd backend; uv run python -m urban.export hebbal` after every `urban.evaluate` run to refresh these.
+The frontend dev server (`frontend/vite.config.js`) serves `backend/data/<area>/` at `/data/<area>/<file>`.
 
 Rules:
 - A candidate in `scenarios*.csv` joins to `candidates.geojson` through the `cand` index of the selected rows,
