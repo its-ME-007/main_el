@@ -263,6 +263,23 @@ export class CityScene {
     }
   }
 
+  // Real traffic (TomTom) segments: their own ribbons, drawn just above the roads. colorFn(point) -> THREE.Color
+  setLive(points, colorFn) {
+    const layer = this._layer('live')
+    layer.clear()
+    const pos = [], col = []
+    for (const p of points) {
+      if (!p.segment?.length || p.ratio == null) continue
+      const n = pushRibbon(pos, p.segment.map(this.proj), -4.5, 4.5, 1.1), c = colorFn(p)
+      for (let i = 0; i < n; i++) col.push(c.r, c.g, c.b)
+    }
+    if (!pos.length) return
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    layer.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false })))
+  }
+
   // fn(props, index) -> THREE.Color
   setRoadColors(fn) {
     const col = this.roadMesh.geometry.attributes.color

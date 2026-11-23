@@ -1,31 +1,45 @@
 // Loads the backend exports (RESPONSIBILITIES.md interface contract). All geometry is WGS84.
-export const AREA = 'hebbal'
-// Study box (west, south, east, north), same as AREAS in backend/urban/data.py
-export const BBOX = [77.5890, 13.0290, 77.6050, 13.0430]
+// The study area is Hebbal; ?area=<name> loads another exported area (data/areas.json lists them with their boxes).
+export const AREA = new URLSearchParams(location.search).get('area') || 'hebbal'
+export const AREA_NAMES = { hebbal: 'Hebbal', koramangala: 'Koramangala' }
+export const areaName = a => AREA_NAMES[a] || a
+// Fallback study boxes (west, south, east, north), same as AREAS in backend/urban/data.py
+const BBOXES = { hebbal: [77.5890, 13.0290, 77.6050, 13.0430] }
 
-const base = `/data/${AREA}`
 const cache = new Map()
 
-export function getJSON(file) {
-  if (!cache.has(file)) {
-    cache.set(file, fetch(`${base}/${file}`).then(r => {
-      if (!r.ok) throw new Error(`${file}: HTTP ${r.status}`)
+function fetchJSON(path) {
+  if (!cache.has(path)) {
+    cache.set(path, fetch(`/data/${path}`).then(r => {
+      if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`)
       return r.json()
-    }).catch(e => { cache.delete(file); throw e }))
+    }).catch(e => { cache.delete(path); throw e }))
   }
-  return cache.get(file)
+  return cache.get(path)
 }
+export const getJSON = file => fetchJSON(`${AREA}/${file}`)
+const optional = (p, dflt) => p.catch(() => dflt)
 
 export const candKey = (u, v) => `${u}|${v}`
 export const runName = (cand, sim) => `c${String(cand).padStart(2, '0')}_${sim}`
 
 export async function loadAll() {
-  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios] = await Promise.all([
-    'roads.geojson', 'buildings.geojson',
+  const areas = await optional(fetchJSON('areas.json'), { hebbal: { bbox: BBOXES.hebbal, scenarios: true } })
+  const bbox = areas[AREA]?.bbox || BBOXES[AREA]
+  if (!bbox) throw new Error(`area "${AREA}" has not been exported yet`)
+  const empty = { type: 'FeatureCollection', features: [] }
+  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios, live] = await Promise.all([
+    getJSON('roads.geojson'),
+    getJSON('buildings.geojson'),
     // zones = obstacles + kind (water/park/institutional); older exports only have obstacles.geojson
-    getJSON('zones.geojson').catch(() => getJSON('obstacles.geojson')),
-    'construction.geojson', 'candidates.geojson', 'edge_stats.json', 'scenarios.json',
-  ].map(f => typeof f === 'string' ? getJSON(f) : f))
+    optional(getJSON('zones.geojson').catch(() => getJSON('obstacles.geojson')), empty),
+    optional(getJSON('construction.geojson'), empty),
+    // the rest exists only once the simulation pipeline has run for this area
+    optional(getJSON('candidates.geojson'), empty),
+    optional(getJSON('edge_stats.json'), {}),
+    optional(getJSON('scenarios.json'), {}),
+    optional(getJSON('live_traffic.json'), null),
+  ])
 
   // Join scenario results to candidate geometry through (u, v), as the contract prefers.
   const meso = new Map((scenarios.meso || []).map(r => [candKey(r.u, r.v), r]))
@@ -40,8 +54,8 @@ export async function loadAll() {
     })
   const others = candidates.features.filter(f => f.properties.status !== 'selected')
 
-  return { roads, buildings, zones, construction, edgeStats, selected, others,
-           baseline: scenarios.baseline || {}, hasMicro: micro.size > 0 }
+  return { areas, bbox, roads, buildings, zones, construction, edgeStats, selected, others, live,
+           baseline: scenarios.baseline || {}, hasMicro: micro.size > 0, hasSim: Object.keys(edgeStats).length > 0 }
 }
 
 // Per-edge stats for the before/after comparison. Both sides come from the same simulator (meso vs meso, micro vs

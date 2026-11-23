@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CityScene } from './scene.js'
-import { BBOX, loadAll, loadComparison } from './data.js'
+import { AREA, areaName, loadAll, loadComparison } from './data.js'
 import ResultsChart from './ResultsChart.jsx'
 import { CHANGE_LEGEND, NO_TRAFFIC, SCORE_LEGEND, SPEED_LEGEND, changeColor, cssGradient, scoreColor, speedColor } from './colors.js'
 
@@ -71,13 +71,15 @@ export default function App() {
     })
     sceneRef.current = s
     loadAll().then(d => {
-      s.build(d, BBOX)
+      s.build(d, d.bbox)
+      if (d.live) s.setLive(d.live.points, p => speedColor(p.ratio))
       setData(d)
+      if (!d.hasSim && d.live) setMode('live')
       // deep link for demos: ?cand=22&view=change&sim=micro&tab=chart
       const q = new URLSearchParams(location.search)
       const hit = q.has('cand') && d.selected.find(c => (c.meso ?? c.micro)?.cand === Number(q.get('cand')))
       if (hit) setSelKey(hit.key)
-      if (['after', 'change'].includes(q.get('view'))) setMode(q.get('view'))
+      if (['after', 'change'].includes(q.get('view')) || (q.get('view') === 'live' && d.live)) setMode(q.get('view'))
       if (q.get('sim') === 'micro') setSimPref('micro')
       if (q.get('tab') === 'chart') setTab('chart')
     }).catch(e => setError(String(e.message || e)))
@@ -109,8 +111,12 @@ export default function App() {
   useEffect(() => {
     const s = sceneRef.current
     if (!data || !s?.roadMesh) return
+    s.setLayerVisible('live', mode === 'live')
     const ok = cmp && !cmp.missing
-    if (mode === 'change' && ok) {
+    if (mode === 'live') {   // real traffic: dim the simulated colours, the TomTom segments carry the data
+      statsRef.current = { kind: 'speed', stats: {} }
+      s.setRoadColors(() => NO_TRAFFIC)
+    } else if (mode === 'change' && ok) {
       statsRef.current = { kind: 'change', before: cmp.before, after: cmp.after }
       s.setRoadColors(p => {
         const b = cmp.before[p.id]?.time_loss || 0, a = cmp.after[p.id]?.time_loss || 0
@@ -127,7 +133,8 @@ export default function App() {
   const improving = ranked.filter(c => c.mesoScore > 0).length
   const validated = ranked.filter(c => c.micro)
   const legend = mode === 'change' && cmp && !cmp.missing ? CHANGE_LEGEND : SPEED_LEGEND
-  const viewLabel = !sel ? 'Baseline traffic (microsim)'
+  const viewLabel = mode === 'live' ? `Real traffic from TomTom, ${data?.live?.fetched_at?.replace('T', ' ')} IST`
+    : !sel ? 'Baseline traffic (microsim)'
     : mode === 'baseline' ? `Before: baseline (${sim})` : mode === 'after' ? `After: with ${label(sel)} (${sim})` : `Change with ${label(sel)} (${sim})`
   const chartRows = ranked.map(c => ({ key: c.key, name: short(c), score: c.score, vph: best(c).cand_vph, dT: best(c).dT, micro: !!c.micro }))
   const select = k => { setSelKey(k); setRoad(null) }
@@ -144,12 +151,19 @@ export default function App() {
       <aside className="panel left">
         <header>
           <div className="brand"><span className="mark" />Urban infrastructure planner</div>
-          <h1>Hebbal Road Planner</h1>
-          <p className="sub">Simulation-based evaluation of new road connections, Hebbal, Bengaluru</p>
+          <h1>{areaName(AREA)} Road Planner</h1>
+          <p className="sub">Simulation-based evaluation of new road connections, {areaName(AREA)}, Bengaluru</p>
         </header>
-        {error && <div className="error">Could not load data: {error}<br />Run <code>uv run python -m urban.export hebbal</code> in <code>backend/</code>.</div>}
+        {error && <div className="error">Could not load data: {error}<br />Run <code>uv run python -m urban.export {AREA}</code> in <code>backend/</code>.</div>}
         {!data && !error && <div className="muted">Loading city…</div>}
-        {data && <>
+        {data && !ranked.length && (
+          <div className="notice">
+            <b>Not simulated yet.</b> The map and roads are real; traffic and candidate roads appear once the pipeline
+            has run for this area:
+            <code>{['sim', 'candidates', 'evaluate', 'export'].map(m => `uv run python -m urban.${m} ${AREA}`).join('\n')}</code>
+          </div>
+        )}
+        {data && ranked.length > 0 && <>
           <div className="summary">
             <div><b>{ranked.length}<span className="of">/{data.selected.length}</span></b><span>candidates simulated</span></div>
             <div><b className={improving ? 'good' : ''}>{improving}</b><span>improve in fast screen</span></div>
@@ -192,12 +206,18 @@ export default function App() {
               <button key={k} disabled={k !== 'baseline' && !sel} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{t}</button>
             ))}
           </div>
+          {data?.live && (
+            <button className={`live-btn ${mode === 'live' ? 'on' : ''}`} onClick={() => setMode(mode === 'live' ? 'baseline' : 'live')}>
+              <span className="dot" /> Real traffic (TomTom)
+            </button>
+          )}
+          {mode === 'live' && data?.live && <LiveSummary live={data.live} sim={data.edgeStats} />}
           {sel?.micro && (
             <div className="seg small">
               {['meso', 'micro'].map(k => <button key={k} className={sim === k ? 'on' : ''} onClick={() => setSimPref(k)}>{k}sim</button>)}
             </div>
           )}
-          <p className="muted small">{sel ? viewLabel : 'Select a candidate road to compare before and after.'}</p>
+          <p className="muted small">{sel || mode === 'live' ? viewLabel : 'Select a candidate road to compare before and after.'}</p>
           {cmp?.missing && <p className="error small">No per-road stats for this run. Re-run the export.</p>}
           <Legend {...legend} />
           {layers.candidates && <Legend {...SCORE_LEGEND} />}
@@ -233,6 +253,41 @@ export default function App() {
                              onClose={() => setSelKey(null)} />}
       {road && <RoadCard p={road} stats={statsRef.current} docked={!!sel} onClose={() => setRoad(null)} />}
       {hover && <Tooltip {...hover} byKey={rankOf} stats={statsRef.current} />}
+    </div>
+  )
+}
+
+// Real (TomTom) vs simulated speeds on the same roads: the honest check of how realistic the simulation is.
+function LiveSummary({ live, sim }) {
+  const pts = live.points.filter(p => p.ratio != null)
+  const both = pts.filter(p => sim[p.edge])
+  const mean = xs => xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length)
+  const real = mean(pts.map(p => p.ratio)), realBoth = mean(both.map(p => p.ratio)), simBoth = mean(both.map(p => sim[p.edge].speed_rel))
+  const worst = [...pts].sort((a, b) => a.ratio - b.ratio).slice(0, 5)
+  return (
+    <div className="live-sum">
+      <table className="kv">
+        <tbody>
+          <tr><th>Road segments measured</th><td>{pts.length}</td></tr>
+          <tr><th>Real speed, all measured roads</th><td><b>{fmt(100 * real, 0)} %</b> of free flow</td></tr>
+          {both.length > 0 && <>
+            <tr><th>Same roads: real</th><td><b>{fmt(100 * realBoth, 0)} %</b></td></tr>
+            <tr><th>Same roads: simulation</th><td><b>{fmt(100 * simBoth, 0)} %</b></td></tr>
+          </>}
+        </tbody>
+      </table>
+      {both.length > 0 && (
+        <p className="small verdict">
+          {Math.abs(simBoth - realBoth) < 0.08 ? 'The simulation matches real speeds closely on these roads.'
+            : simBoth > realBoth ? `The simulation runs faster than reality here (${fmt(100 * (simBoth - realBoth), 0)} points), so real congestion is worse than modelled.`
+            : `The simulation is slower than reality here (${fmt(100 * (realBoth - simBoth), 0)} points), so it overstates congestion.`}
+        </p>
+      )}
+      <h3>Slowest right now</h3>
+      <ol className="worst">
+        {worst.map((p, i) => <li key={i}><span>{fmt(p.current_kmh, 0)} km/h</span><span className="muted"> of {fmt(p.free_flow_kmh, 0)} km/h</span></li>)}
+      </ol>
+      <p className="muted small">{live.source}. A single snapshot: speeds change through the day.</p>
     </div>
   )
 }

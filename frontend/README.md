@@ -17,11 +17,17 @@ Teammates without the backend can unzip a shared `data/hebbal/` folder into `bac
 - Roads coloured by congestion (speed as a share of the limit) from the baseline simulation
 - Buildings (heights are illustrative; OSM has none here), no-build zones, metro worksites, the study box
 - The 40 simulated candidate roads, coloured by score; the ranking list on the left
+- Ranking uses the micro score where a candidate was validated (tagged micro ✓ / ✗), otherwise the meso screen
 - Click a candidate: score breakdown, before/after delay, construction cost; **Before / After / Change** views
   recolour every road with that scenario's per-road results (meso vs meso, or micro vs micro)
-- Click a road: its speed, vehicles and delay
+- Click a road: its speed, vehicles and delay; during a comparison, before vs after for that road
+- **Chart** tab: score vs traffic on the new road for all candidates (the Braess pattern)
+- **Scoring weights** sliders (w1..w5) re-rank all candidates live; defaults = backend `WEIGHTS`
+- Hover a candidate on the map, in the list or in the chart to highlight it everywhere
+- **Real traffic (TomTom)**: appears when `live_traffic.json` exists (`uv run python -m urban.live hebbal`, needs
+  `TOMTOM_API_KEY` in `backend/.env`); colours measured road segments and compares real vs simulated speeds
 
-Deep links for demos: `/?cand=22&view=change&sim=micro`.
+Deep links for demos: `/?cand=22&view=change&sim=micro`, `/?tab=chart`, `/?view=live`.
 
 ## Files
 
@@ -30,4 +36,5 @@ Deep links for demos: `/?cand=22&view=change&sim=micro`.
 | `src/data.js` | loads the exports and joins scenarios to candidates through `(u, v)` |
 | `src/scene.js` | the Three.js city: geometry, layers, colours, picking, camera focus |
 | `src/colors.js` | colour scales and legends |
-| `src/App.jsx` | panels: ranking, view controls, layers, candidate and road cards |
+| `src/App.jsx` | panels: ranking, view controls, weights, layers, candidate / road cards, real-traffic summary |
+| `src/ResultsChart.jsx` | the score vs traffic scatter chart |

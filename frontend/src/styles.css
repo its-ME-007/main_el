@@ -180,3 +180,21 @@ details[open] > summary h2::before { transform: rotate(90deg); }
 .label.hover { color: #fff; font-weight: 600; font-size: 12px; background: rgba(11, 15, 22, 0.9); border-color: rgba(255, 255, 255, 0.35);
   transform: translateY(-6px); }
 .ranking li.hovered { background: rgba(255, 255, 255, 0.08); box-shadow: inset 2px 0 0 var(--accent); }
+
+/* not-simulated notice, real traffic */
+.notice { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: rgba(110, 168, 255, 0.08);
+  border: 1px solid rgba(110, 168, 255, 0.25); line-height: 1.5; font-size: 13px; }
+.notice code { display: block; white-space: pre; margin-top: 8px; font-size: 11px; color: var(--muted); overflow-x: auto; }
+.live-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.04); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px; font: inherit; cursor: pointer; }
+.live-btn.on { background: rgba(255, 92, 108, 0.14); border-color: rgba(255, 92, 108, 0.45); }
+.live-btn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px rgba(255, 92, 108, 0.25); }
+.live-btn.on .dot { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(255, 92, 108, 0); } }
+.live-sum { margin: 4px 0 8px; }
+.worst { margin: 0; padding-left: 18px; font-size: 12.5px; }
+.worst li { margin: 2px 0; }
+.live-sum .kv th { width: 62%; font-size: 12.5px; }
+.live-sum .kv td { font-size: 12.5px; }
+.notice code { white-space: pre-wrap; word-break: break-all; }

@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react'
 // Dev server serves the backend exports straight from backend/data/<area>/ at /data/<area>/<file>.
 // The Phase 7 FastAPI server will serve the same paths, so the frontend code does not change.
 const DATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../backend/data')
-const SAFE = /^\/[\w-]+\/(scenario_stats\/)?[\w.-]+\.(geojson|json)$/   // no "..", only exported json
+const SAFE = /^\/([\w-]+\/(scenario_stats\/)?)?[\w-][\w.-]*\.(geojson|json)$/   // no "..", only exported json
 
 function backendData() {
   return {
