@@ -116,6 +116,7 @@ def export(area="hebbal"):
 def noise_runs(d):
     """Every noise_<sim>[_l<lanes>v<kmh>].csv with at least 2 seeds and a candidate (a single seed says nothing)."""
     import re
+    from urban.evaluate import DEFAULT_CAND
     from urban.noise import summary
     out = {}
     for f in sorted(d.glob("noise_*.csv")):
@@ -123,7 +124,7 @@ def noise_runs(d):
         df = pd.read_csv(f)
         if not mt or df[df.run == "base"].seed.nunique() < 2 or (df.run == "base").all():
             continue
-        lanes, kmh = (int(mt[2]), int(mt[3])) if mt[2] else (1, 40)
+        lanes, kmh = (int(mt[2]), int(mt[3])) if mt[2] else DEFAULT_CAND
         key = mt[1] + (f"_l{lanes}v{kmh}" if mt[2] else "")
         out[key] = {"label": f"{lanes} lane{'s' if lanes > 1 else ''} each way, {kmh} km/h", "lanes": lanes, "kmh": kmh,
                     **summary(df)}

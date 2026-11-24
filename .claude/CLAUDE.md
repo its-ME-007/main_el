@@ -140,6 +140,12 @@ and shows everything in an interactive 3D interface.
     2-4.4 % but add 5-19 % box delay. Both-positive winners: c19 (4952656449, 165 m, 297 veh/h, dT +1.3, dQ +7.5,
     score 4.98), c01/c00 (2460375002, ~260 m, 86 veh/h, dT +1.2, dQ +7.6), c15/c14/c13 (2408528584, 108-126 m,
     ~480 veh/h, dT +1.6, dQ +3.5: the same junction as the old net's winners c21-c23).
+- LEFT-HAND traffic + 2-lane candidates (user, 2026-11-24): `build_net` adds `--lefthand` (net element carries
+  lefthand="true"; the untagged-speed 2nd pass keeps it). Vs the RHT net: 10 TLS and flyover edges unchanged,
+  9,547 vs 9,546 edges, 28,847 vs 28,850 connections (ramp guessing: the 94 m Tumkur Road Exit added off-ramp edge
+  is gone, RT Nagar Main Road gained 2 x 13 m pieces). Candidate default now 2 lanes each way, 50 km/h
+  (`DEFAULT_CAND`); other variants via CAND_LANES/CAND_KMH get `_l<lanes>v<kmh>` in scenario dirs and CSVs
+  (evaluate and noise). RHT results archived in data/hebbal/archive_v2_righthand/.
   - OPEN: c03/c04 carry about 25 veh/h yet show dT -3.4 %, so the meso noise floor from rerouting chaos is a few %.
     Consider multiple seeds. c02/c07 report a mean duration identical to baseline (357.97) while timeLoss/routeLength
     differ. Suspect; dT may be better taken from mean_time_loss.

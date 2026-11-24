@@ -25,10 +25,11 @@ FULL = 3600   # urban.evaluate's default DURATION
 
 def run_dir(d, tag, sim, seed):
     # reuse urban.evaluate's seed-42 runs only at the full duration; short test runs must never write into them.
-    # Candidate variants (CAND_LANES/CAND_KMH) get their own dirs; the baseline has no candidate, so it is shared.
+    # Candidate variants (CAND_LANES/CAND_KMH) get their own dirs (urban.evaluate names them the same way); the
+    # baseline has no candidate, so it is shared.
     if tag != "base":
         tag += VARIANT
-    if seed == SEED and DURATION == FULL and not (VARIANT and tag != "base"):
+    if seed == SEED and DURATION == FULL:
         return d / "sim" / "scenarios" / f"{tag}_{sim}"
     return d / "sim" / "noise" / (f"{tag}_{sim}_s{seed}" + ("" if DURATION == FULL else f"_d{DURATION}"))
 

@@ -23,12 +23,14 @@ import sumolib  # noqa: E402
 from urban.data import AREAS, DATA  # noqa: E402
 from urban.sim import DURATION, SEED, assign, in_box, make_demand, run  # noqa: E402
 
-# default: 40 km/h, 1 lane each way (a local connector, not an arterial). Override for stronger variants, e.g.
-# CAND_LANES=2 CAND_KMH=60 (urban.noise keeps each variant's runs and CSV apart via VARIANT).
-CAND_LANES = int(os.environ.get("CAND_LANES", 1))
-CAND_KMH = int(os.environ.get("CAND_KMH", 40))
+# default (user, 2026-11-24): 2 lanes each way, 50 km/h. Other variants via env, e.g. CAND_LANES=1 CAND_KMH=40;
+# VARIANT keeps their scenario dirs and CSVs apart (urban.evaluate and urban.noise). The baseline has no candidate,
+# so it is shared by all variants.
+DEFAULT_CAND = (2, 50)
+CAND_LANES = int(os.environ.get("CAND_LANES", DEFAULT_CAND[0]))
+CAND_KMH = int(os.environ.get("CAND_KMH", DEFAULT_CAND[1]))
 CAND_SPEED = CAND_KMH / 3.6   # m/s
-VARIANT = "" if (CAND_LANES, CAND_KMH) == (1, 40) else f"_l{CAND_LANES}v{CAND_KMH}"
+VARIANT = "" if (CAND_LANES, CAND_KMH) == DEFAULT_CAND else f"_l{CAND_LANES}v{CAND_KMH}"
 CAND_EDGES = ("cand_f", "cand_b")
 # S = w1 dT + w2 dQ + w3 dC - w4 L - w5 P   (idea.md §7). Units chosen so terms are comparable:
 #   dT % mean time loss saved, dQ % study-box queueing (edge waiting time) saved,
@@ -117,7 +119,7 @@ def sweep(env, rows, mode, root, workers=1, quiet=False):
     d, base, routes, box, _, incoming = env
     tag = mode
     jobs = [(base, routes, box, None, incoming, root / f"base_{tag}", mode)]
-    jobs += [(base, routes, box, c, incoming, root / f"c{i:02d}_{tag}", mode) for i, c in rows.iterrows()]
+    jobs += [(base, routes, box, c, incoming, root / f"c{i:02d}{VARIANT}_{tag}", mode) for i, c in rows.iterrows()]
     res = run_all(jobs, workers)
     b = next(res)
     quiet or print(f"[{tag}] baseline: mean travel {b['mean_travel_time']:.1f} s, {b['seconds'] or 0:.0f} s")
@@ -134,11 +136,11 @@ def evaluate(area="hebbal", limit=None, micro=0, workers=1, screen="macro"):
     env = setup(area)
     d, cands, root = env[0], env[4].head(limit), env[0] / "sim" / "scenarios"
     b, screen_df = sweep(env, cands, screen, root, workers)
-    screen_df.to_csv(d / f"scenarios_{screen}.csv", index=False)
+    screen_df.to_csv(d / f"scenarios_{screen}{VARIANT}.csv", index=False)
     micro_df = None
     if micro:
         _, micro_df = sweep(env, cands.loc[screen_df.cand.head(micro)], "micro", root, workers)
-        micro_df.to_csv(d / "scenarios_micro.csv", index=False)
+        micro_df.to_csv(d / f"scenarios_micro{VARIANT}.csv", index=False)
     return b, screen_df, micro_df
 
 

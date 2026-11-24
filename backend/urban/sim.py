@@ -74,6 +74,7 @@ def build_net(area):
     net, raw = out / "net.net.xml", out / "raw.net.xml"
     subprocess.run([
         sumolib.checkBinary("netconvert"), "--osm-files", str(DATA / area / "roads.osm"), "-o", str(raw),
+        "--lefthand",   # India drives on the left
         "--geometry.remove", "--ramps.guess", "--junctions.join", "--roundabouts.guess",
         # real OSM highway=traffic_signals nodes; guess-signals/join merge signal clusters into one junction TLS
         "--tls.guess-signals", "--tls.join", "--tls.default-type", "actuated",
