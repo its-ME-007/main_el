@@ -44,7 +44,9 @@ export async function loadAll() {
   ])
 
   // Join scenario results to candidate geometry through (u, v), as the contract prefers.
-  const meso = new Map((scenarios.meso || []).map(r => [candKey(r.u, r.v), r]))
+  // screening results: macro (deterministic marouter assignment) when exported, else the older meso screen.
+  // TODO: UI labels still say "meso"; per-scenario heatmap stats for macro runs are not exported yet.
+  const meso = new Map((scenarios.macro || scenarios.meso || []).map(r => [candKey(r.u, r.v), r]))
   const micro = new Map((scenarios.micro || []).map(r => [candKey(r.u, r.v), r]))
   // ranking happens in App.jsx, because it depends on the user's scoring weights
 
