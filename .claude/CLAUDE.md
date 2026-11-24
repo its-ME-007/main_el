@@ -146,6 +146,23 @@ and shows everything in an interactive 3D interface.
   is gone, RT Nagar Main Road gained 2 x 13 m pieces). Candidate default now 2 lanes each way, 50 km/h
   (`DEFAULT_CAND`); other variants via CAND_LANES/CAND_KMH get `_l<lanes>v<kmh>` in scenario dirs and CSVs
   (evaluate and noise). RHT results archived in data/hebbal/archive_v2_righthand/.
+  - LHT recalibration: FLYOVER_RATE 3450 gave flyover 3,648 veh/h; default now 3030 -> 3,265 veh/h, 8,831 arrived,
+    38 teleports. Metro worksite crossing penalty raised (user): P_COST 22 = 5.5 score points per crossing; 34/40
+    candidates cross it, incl. all old winners (c23 2 crossings, c18-c20), so few non-crossing roads score > 0.
+  - ISOLATION (2026-11-24, `urban.isolate`, micro, same demand, `isolate.csv`): flyover speed is fine (user); worry
+    = congested roads crawl. One change at a time vs ref: gap10 (car minGap 1.0), mix (60 % moto 2.2 m gap 0.5 /
+    35 % car / 5 % bus, same vehicle count), mixgap. Time loss 193 -> 173 / 164 / 145 s, teleports 38 -> 30 / 7 / 7,
+    top-10 bottleneck median 5.6 -> 6.5 km/h. Gains land on moderate roads (Bellary Rd 31 -> 41-49 km/h); the true
+    stalls do NOT move in any variant (flyover loop 1422993566 3-4, 238204954 ~1.4, Anandnagar -133882079#0 ~1,
+    1423056973 ~0.4, ORR 1073384218#0 3-4 km/h), so they are junction/topology/signal problems, not vehicle params.
+    Mix drops flyover flow to ~2,450 PCU/h: adopting it needs recalibration in PCU. No TomTom data yet (no key).
+  - JUNCTION ROUND (2026-11-24, `isolate2.log`): stall causes = (1) flyover loop 1422993566 merges as minor into
+    3-lane Bellary Rd (3,265 veh/h) at priority node 13052245180, no gap; (2) local 1-lane tertiary ring (238204954,
+    Anandnagar, 1092259723, 327073709) all-minor junctions + U-turns, circular wait; (3) ORR TLS
+    cluster_11951813051_335663834 equal-split 33/90 s. Results vs ref (time loss 193 s, 38 teleports):
+    zipper (node -> type zipper) 101 s, 7 teleports, loop 3 -> 27 km/h, Anandnagar 0.5 -> 10; jb20
+    (--ignore-junction-blocker 20) alone ~no change; act (all TLS actuated) worse, 220 s; all3 89 s, 8 teleports,
+    frontage 238204954 1.7 -> 40 km/h, top-10 median 27 km/h. ORR 1073384218#0 stays 3-4 km/h in every variant.
   - OPEN: c03/c04 carry about 25 veh/h yet show dT -3.4 %, so the meso noise floor from rerouting chaos is a few %.
     Consider multiple seeds. c02/c07 report a mean duration identical to baseline (357.97) while timeLoss/routeLength
     differ. Suspect; dT may be better taken from mean_time_loss.

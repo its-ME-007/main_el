@@ -41,3 +41,5 @@ Deep links for demos: `/?cand=22&view=change&sim=micro`, `/?tab=chart`, `/?view=
 | `src/colors.js` | colour scales and legends |
 | `src/App.jsx` | panels: ranking, view controls, weights, layers, candidate / road cards, real-traffic summary |
 | `src/ResultsChart.jsx` | the score vs traffic scatter chart |
+
+Graphics upgrade ideas for the CGVR component: [CGVR_ROADMAP.md](CGVR_ROADMAP.md).

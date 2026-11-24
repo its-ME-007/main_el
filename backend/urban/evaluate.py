@@ -36,8 +36,10 @@ CAND_EDGES = ("cand_f", "cand_b")
 #   dT % mean time loss saved, dQ % study-box queueing (edge waiting time) saved,
 #   dC % of the old network detour the new road removes, L metres, P cost units (below).
 WEIGHTS = {"dT": 1.0, "dQ": 0.5, "dC": 0.01, "L": 0.002, "P": 0.25}
-# P cost units: a demolished building = 1, a grade-separated road crossing = 0.5, a metro worksite crossing = 1
-P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 1.0}
+# P cost units: a demolished building = 1, a grade-separated road crossing = 0.5, a metro worksite crossing = 22
+# (user, 2026-11-24: crossing the metro works is heavily penalised, 22 x WEIGHTS["P"] = 5.5 score points each,
+# so a crossing candidate only wins on a large gain; at 1 it cost 0.25 points, nothing next to dT/dQ of 1-8)
+P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 22.0}
 
 
 def scenario_net(base, cand, incoming, out):

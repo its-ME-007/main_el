@@ -19,7 +19,7 @@ REROUTE = os.environ.get("REROUTE", "1") != "0"   # REROUTE=0: keep free-flow ro
 # Calibration knobs (override via env for sweeps). Through traffic = flows between arterial boundary edges,
 # split by whether the pair's free-flow route uses the Hebbal flyover, so the flyover can be loaded to
 # its surveyed volume without inflating every other road.
-FLYOVER_RATE = int(os.environ.get("FLYOVER_RATE", 3450))  # veh/h total over pairs routed via the main flyover
+FLYOVER_RATE = int(os.environ.get("FLYOVER_RATE", 3030))  # veh/h total over pairs routed via the main flyover
 OTHER_RATE = int(os.environ.get("OTHER_RATE", 3800))      # veh/h total over the remaining arterial pairs
 LOCAL_RATE = int(os.environ.get("LOCAL_RATE", 2000))      # veh/h random local trips, biased into the study box
 BOX_WEIGHT = 10      # local trip origin/destination weight for edges inside the study box (others = 1)
@@ -36,6 +36,10 @@ FLYOVER_TARGET_VPH = 3225
 # trunk 60 (61), trunk_link 30 (10). Types with no tagged sample get the nearest analogue. Tagged ways keep their tag.
 UNTAGGED_KMH = {"trunk": 60, "primary": 50, "secondary": 40, "tertiary": 50, "unclassified": 30, "residential": 30,
                 "trunk_link": 30, "primary_link": 30, "secondary_link": 30, "tertiary_link": 30}
+# Merges built as zipper junctions (user, 2026-11-24). 13052245180: the new flyover loop (1422993566) joining 3-lane
+# Bellary Rd; as a priority merge the loop never found a gap in 3,265 veh/h and queued back 649 m into the local
+# roads (urban.isolate: time loss 193 -> 101 s, teleports 38 -> 7).
+ZIPPER_NODES = ("13052245180",)
 
 
 def untagged_speeds(raw, net):
@@ -46,14 +50,19 @@ def untagged_speeds(raw, net):
     dflt = {t.get("id"): float(t.get("speed")) for t in
             ET.parse(SUMO_HOME / "data" / "typemap" / "osmNetconvert.typ.xml").getroot().iter("type")}
     edges = []
-    for e in sumolib.net.readNet(str(raw)).getEdges():
+    nw = sumolib.net.readNet(str(raw))
+    for e in nw.getEdges():
         kind = e.getType().removeprefix("highway.")
         if kind in UNTAGGED_KMH and abs(e.getSpeed() - dflt.get(e.getType(), -1)) < 0.01:
             edges.append(f'<edge id="{e.getID()}" speed="{UNTAGGED_KMH[kind] / 3.6:.2f}"/>')
     edg = net.parent / "untagged_speeds.edg.xml"
     edg.write_text("<edges>\n" + "\n".join(edges) + "\n</edges>\n")
+    nod = net.parent / "zipper.nod.xml"   # same pass: ZIPPER_NODES become zipper merges
+    nod.write_text("<nodes>" + "".join(f'<node id="{n}" x="{nw.getNode(n).getCoord()[0]}" '
+                                       f'y="{nw.getNode(n).getCoord()[1]}" type="zipper"/>' for n in ZIPPER_NODES)
+                   + "</nodes>")
     subprocess.run([sumolib.checkBinary("netconvert"), "--sumo-net-file", str(raw), "--edge-files", str(edg),
-                    "-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
+                    "--node-files", str(nod), "-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
     return len(edges)
 
 
@@ -132,20 +141,23 @@ def make_demand(net, area, seed=SEED):
 MESO = ["--mesosim", "--meso-junction-control", "true"]  # queue-based edges; junction-control keeps TLS effects
 
 
-def run(net, routes, out, seed=SEED, meso=False):
+def run(net, routes, out, seed=SEED, meso=False, extra_add="", extra_args=()):
     """Run SUMO headless; return (summary metrics, per-edge stats).
-    meso=True: mesoscopic model, much faster, for candidate screening (validate top picks with microsim)."""
+    meso=True: mesoscopic model, much faster, for candidate screening (validate top picks with microsim).
+    extra_add: XML put into the additional file, e.g. a vType with id DEFAULT_VEHTYPE (urban.isolate).
+    extra_args: more sumo options (urban.isolate)."""
     out.mkdir(parents=True, exist_ok=True)
     add = out / "edgedata.add.xml"
-    add.write_text(f'<additional><edgeData id="e" file="{(out / "edges.xml").as_posix()}"/></additional>')
+    add.write_text(f'<additional>{extra_add}<edgeData id="e" file="{(out / "edges.xml").as_posix()}"/></additional>')
     subprocess.run([
         sumolib.checkBinary("sumo"), "-n", str(net), "-r", ",".join(map(str, routes)), "-a", str(add),
         "--tripinfo-output", str(out / "tripinfo.xml"), "--statistic-output", str(out / "stats.xml"),
         "--seed", str(seed), "--ignore-route-errors",
         "--device.rerouting.probability", "1" if REROUTE else "0", "--device.rerouting.period", "60",  # adapt to congestion
         "--time-to-teleport", "300", "--end", str(DURATION * 2),
+        "--ignore-junction-blocker", "20",   # user 2026-11-24: breaks the local-road gridlock ring (urban.isolate)
         "--no-step-log", "--no-warnings", "--duration-log.statistics", "false",
-        *(MESO if meso else []),
+        *(MESO if meso else []), *extra_args,
     ], check=True)
 
     trips_done = list(sumolib.xml.parse(str(out / "tripinfo.xml"), "tripinfo"))
