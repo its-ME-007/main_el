@@ -135,8 +135,8 @@ and shows everything in an interactive 3D interface.
   - Rerun on the NEW net (Windows, 2026-11-24): old results moved to data/hebbal/archive_v1_default_speeds/.
     Micro baseline matches the Mac: flyover 3,241 veh/h, 8,966 arrived, 20 teleports, time loss 133.2 s (sumo 1,208 s
     here). Candidates: 90 feasible, 40 selected from 15 seeds, 34 cross the metro worksite (candidate indices differ
-    from the old net). Macro screen killed by Claude Code for low system memory at 37/40 (c37-c39 missing; rerun
-    resumes). Macro baseline mean travel 750.7 s. Same pattern: 1,000-2,400 veh/h shortcuts cut network delay
+    from the old net). Macro screen COMPLETE (40/40, `scenarios_macro.csv`, exported to scenarios.json "macro"); all 40
+    cut network delay. Macro baseline mean travel 750.7 s. Same pattern: 1,000-2,400 veh/h shortcuts cut network delay
     2-4.4 % but add 5-19 % box delay. Both-positive winners: c19 (4952656449, 165 m, 297 veh/h, dT +1.3, dQ +7.5,
     score 4.98), c01/c00 (2460375002, ~260 m, 86 veh/h, dT +1.2, dQ +7.6), c15/c14/c13 (2408528584, 108-126 m,
     ~480 veh/h, dT +1.6, dQ +3.5: the same junction as the old net's winners c21-c23).
