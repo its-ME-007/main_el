@@ -21,6 +21,12 @@ Teammates without the backend can unzip a shared `data/hebbal/` folder into `bac
 - Click a candidate: score breakdown, before/after delay, construction cost; **Before / After / Change** views
   recolour every road with that scenario's per-road results (meso vs meso, or micro vs micro)
 - Click a road: its speed, vehicles and delay; during a comparison, before vs after for that road
+- **Results** toggle: Macro screen (all 40, fast) | Micro check (the 5-seed validated ones); drives ranking, map, chart
+- **3D bridges**: candidates that cross a road or the metro worksite are raised decks with ramps and instanced piers
+- **Traffic animation**: real SUMO vehicles (`urban.fcd`) as one InstancedMesh, coloured by speed; baseline vs a
+  candidate, play / speed / time slider, cars that use the candidate highlighted
+- **Shaders**: roads flow at their simulated speed (custom GLSL), Before ⟷ After blend slider, striped "planned" candidates
+- **Parallel** tab: speedup / efficiency of the Phase 5 benchmark (`parallel.json`)
 - **Chart** tab: score vs traffic on the new road for all candidates (the Braess pattern)
 - **Scoring weights** sliders (w1..w5) re-rank all candidates live; defaults = backend `WEIGHTS`
 - Hover a candidate on the map, in the list or in the chart to highlight it everywhere
@@ -41,3 +47,8 @@ Deep links for demos: `/?cand=22&view=change&sim=micro`, `/?tab=chart`, `/?view=
 | `src/colors.js` | colour scales and legends |
 | `src/App.jsx` | panels: ranking, view controls, weights, layers, candidate / road cards, real-traffic summary |
 | `src/ResultsChart.jsx` | the score vs traffic scatter chart |
+| `src/ParallelChart.jsx` | Phase 5 speedup chart and table |
+| `src/traffic.js` | vehicle animation (InstancedMesh, interpolation, highlight) |
+| `src/TrafficPanel.jsx` | animation controls |
+
+Graphics upgrade ideas for the CGVR component: [CGVR_ROADMAP.md](CGVR_ROADMAP.md).

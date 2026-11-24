@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { Traffic } from './traffic.js'
 
 export function projection(bbox) {
   const lon0 = (bbox[0] + bbox[2]) / 2, lat0 = (bbox[1] + bbox[3]) / 2
@@ -12,6 +13,7 @@ export function projection(bbox) {
 }
 
 const BG = '#0b0f16'
+const BLACK = new THREE.Color(0, 0, 0)
 const LANE_W = 3.4
 const ARTERIAL = /trunk|primary|motorway/
 const MAJOR = /trunk|primary|motorway|secondary/
@@ -23,9 +25,14 @@ const dedupe = pts => pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 
 // Continuous ribbon with mitred joins. l, r = offsets of its two edges along the right-hand normal of the direction
 // of travel. SUMO edge shapes are the road centreline with lanes spread to the right, so a direction's lanes are
 // [0, width] and the two directions of a two-way road sit side by side.
-function pushRibbon(out, raw, l, r, y) {
+function pushRibbon(out, raw, l, r, y, along) {
   const pts = dedupe(raw)
   if (pts.length < 2) return 0
+  if (along) {   // [metres along the road in the direction of travel, 0..1 across] per vertex, for the flow shader
+    const d = [0]
+    for (let i = 1; i < pts.length; i++) d.push(d[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
+    for (let i = 0; i < pts.length - 1; i++) along.push(d[i], 0, d[i + 1], 0, d[i], 1, d[i], 1, d[i + 1], 0, d[i + 1], 1)
+  }
   const norms = pts.slice(0, -1).map((a, i) => {
     const b = pts[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1])
     return [-(b[1] - a[1]) / len, (b[0] - a[0]) / len]
@@ -51,6 +58,130 @@ const ribbonGeometry = (pts, l, r, y) => {
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   return g
+}
+
+// Ribbon over a 3D polyline [[x, y, z], ...]: like ribbonGeometry, but each point keeps its own height (bridge decks).
+// l, r = lateral offsets along the horizontal right-hand normal; dy lifts it above the path.
+function ribbon3(path, l, r, dy) {
+  const pos = []
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1], len = Math.hypot(b[0] - a[0], b[2] - a[2]) || 1
+    const nx = -(b[2] - a[2]) / len, nz = (b[0] - a[0]) / len
+    const v = (p, o) => [p[0] + nx * o, p[1] + dy, p[2] + nz * o]
+    pos.push(...v(a, l), ...v(b, l), ...v(a, r), ...v(a, r), ...v(b, l), ...v(b, r))
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  return g
+}
+
+// Grade-separated candidates (they cross a road or the metro worksite; priced in P) are drawn as raised decks:
+// smooth ramps at both ends, a level span in between. Every deck clears 6.5 m (what crossing a road needs); short
+// links therefore get steep ramps, which shows honestly that they are hard to build as bridges.
+const BRIDGE = { clearance: 6.5, maxRamp: 90, halfWidth: 7, thickness: 1.3, parapet: 1.1, pierEvery: 24 }
+function bridgePath(pts, samples = 48) {
+  const a = pts[0], b = pts[pts.length - 1], L = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const ramp = Math.min(BRIDGE.maxRamp, 0.35 * L)
+  const top = BRIDGE.clearance + BRIDGE.thickness   // deck surface above the clearance
+  const smooth = t => t * t * (3 - 2 * t)
+  const h = s => top * smooth(Math.min(1, s / ramp, (L - s) / ramp))
+  return { L, top, h, path: Array.from({ length: samples + 1 }, (_, i) => {
+    const t = i / samples
+    return [a[0] + (b[0] - a[0]) * t, h(t * L), a[1] + (b[1] - a[1]) * t]
+  }) }
+}
+
+// Sweep a closed cross-section [[lateral, up], ...] along a 3D path whose plan is a straight line. The section stays
+// level (up = world up) instead of following Frenet frames, so the deck never twists.
+function sweep(path, section) {
+  const a = path[0], b = path[path.length - 1], len = Math.hypot(b[0] - a[0], b[2] - a[2]) || 1
+  const nx = -(b[2] - a[2]) / len, nz = (b[0] - a[0]) / len
+  const pos = [], idx = [], m = section.length
+  for (const p of path) for (const [u, v] of section) pos.push(p[0] + nx * u, p[1] + v, p[2] + nz * u)
+  for (let i = 0; i < path.length - 1; i++) {
+    for (let j = 0; j < m; j++) {
+      const k = (j + 1) % m, p0 = i * m + j, p1 = i * m + k, q0 = p0 + m, q1 = p1 + m
+      idx.push(p0, q0, p1, p1, q0, q1)
+    }
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setIndex(idx)
+  const flat = g.toNonIndexed()   // flat-shaded faces: crisp concrete edges
+  flat.computeVertexNormals()
+  return flat
+}
+
+// deck slab with a parapet on each side, as a closed outline (lateral, up), deck top at 0
+const { halfWidth: HW, thickness: TH, parapet: PH } = BRIDGE
+const DECK_SECTION = [[-HW, -TH], [HW, -TH], [HW, PH], [HW - 0.45, PH], [HW - 0.45, 0], [-HW + 0.45, 0],
+                      [-HW + 0.45, PH], [-HW, PH]]
+
+// Road surface shader (CGVR: custom GLSL). Per vertex: two colours and two speeds (before / after a candidate),
+// blended by uMix on the GPU, so switching scenarios is a smooth fade instead of a rebuild. The fragment shader
+// draws light dashes that travel along each road in its direction of travel at FLOW x its simulated speed:
+// free-flowing roads stream, jammed roads crawl, roads without traffic stay still.
+const FLOW = 2.5        // dashes move 2.5x real speed, so slow traffic still visibly moves
+const DASH = 26         // m between dashes
+function roadMaterial(uniforms) {
+  return new THREE.ShaderMaterial({
+    // fog uniforms are per material (filled by the renderer); time / blend / flow are the scene's shared objects
+    uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: uniforms.uTime, uMix: uniforms.uMix,
+                uFlow: uniforms.uFlow },
+    vertexShader: `
+      attribute vec3 color2;
+      attribute float speed, speed2;
+      attribute vec2 along;
+      uniform float uMix;
+      varying vec3 vColor;
+      varying float vSpeed;
+      varying vec2 vAlong;
+      #include <fog_pars_vertex>
+      void main() {
+        vColor = mix(color, color2, uMix);
+        vSpeed = mix(speed, speed2, uMix);
+        vAlong = along;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform float uTime, uFlow;
+      varying vec3 vColor;
+      varying float vSpeed;
+      varying vec2 vAlong;
+      #include <fog_pars_fragment>
+      void main() {
+        vec3 c = vColor;
+        // phase moves forward along the road; fract() repeats it every DASH metres
+        float ph = fract((vAlong.x - uTime * vSpeed * ${FLOW.toFixed(1)}) / ${DASH.toFixed(1)});
+        float dash = smoothstep(0.0, 0.08, ph) * (1.0 - smoothstep(0.28, 0.4, ph));
+        float mid = 1.0 - smoothstep(0.18, 0.42, abs(vAlong.y - 0.5));      // a stripe down the middle only
+        float moving = smoothstep(0.3, 1.5, vSpeed);                        // no dashes where nothing drives
+        c = mix(c, c * 1.5 + 0.18, uFlow * dash * mid * moving * 0.55);
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+    vertexColors: true, side: THREE.DoubleSide, fog: true,
+  })
+}
+
+// Candidate "planned road" look (CGVR: shader injection). Adds diagonal stripes in world space that scroll with time
+// to a built-in material, so its colour, opacity and hover styling keep working.
+function plannedStripes(mat, uniforms) {
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uTime = uniforms.uTime
+    sh.vertexShader = 'varying vec3 vWorldP;\n' + sh.vertexShader.replace('#include <project_vertex>',
+      '#include <project_vertex>\n  vWorldP = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+    sh.fragmentShader = 'uniform float uTime;\nvarying vec3 vWorldP;\n' + sh.fragmentShader.replace('#include <dithering_fragment>',
+      `#include <dithering_fragment>
+      float band = fract((vWorldP.x + vWorldP.z) / 7.0 - uTime * 0.5);
+      float stripe = smoothstep(0.45, 0.5, band) * (1.0 - smoothstep(0.95, 1.0, band));
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.55, stripe * 0.55);`)
+  }
+  mat.customProgramCacheKey = () => 'planned-stripes'
+  return mat
 }
 
 // Stable pseudo-random numbers per building: OSM has no height data for this area, so heights are illustrative.
@@ -81,6 +212,8 @@ export class CityScene {
     this.layers = {}
     this.candidates = new Map()   // key -> { mesh, glow, pts, center }
     this.clock = new THREE.Clock()
+    // shared by every custom shader: time, before/after blend, flow on/off
+    this.uniforms = { uTime: { value: 0 }, uMix: { value: 0 }, uFlow: { value: 1 } }
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true })
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -94,6 +227,8 @@ export class CityScene {
     container.appendChild(this.labels.domElement)
 
     this.scene = new THREE.Scene()
+    this.world = new THREE.Group()   // everything except lights
+    this.scene.add(this.world)
     this.scene.fog = new THREE.Fog(BG, 2200, 6000)
     this.camera = new THREE.PerspectiveCamera(42, 1, 5, 20000)
     this.camera.position.set(450, 1900, 1150)
@@ -122,10 +257,31 @@ export class CityScene {
   }
 
   _frame() {
-    const t = this.clock.getElapsedTime()
+    const dt = Math.min(0.1, this.clock.getDelta())   // capped, so a background tab does not jump the playback
+    const t = this.clock.elapsedTime
+    this.uniforms.uTime.value = t
+    if (this._mixTo != null) {
+      const m = this.uniforms.uMix, d = this._mixTo - m.value
+      m.value = Math.abs(d) < 0.002 ? this._mixTo : m.value + d * Math.min(1, dt * 7)
+    }
+    if (this.traffic?.data) {
+      this.traffic.update(dt, this.camera.position.distanceTo(this.controls.target))
+      const now = performance.now()
+      if (this.onTrafficTick && now - (this._tick || 0) > 150) { this._tick = now; this.onTrafficTick(this.traffic) }
+    }
     this.controls.update()
     this._tween?.()
     if (this.halo?.visible) this.halo.material.opacity = 0.55 + 0.35 * Math.sin(t * 3)
+    if (this.hoverHalo?.visible) this.hoverHalo.material.opacity = 0.35 + 0.25 * Math.sin(t * 6)
+    // hovered candidate rises a few metres; ease every strip towards its target height
+    for (const c of this.candidates.values()) {
+      const y = c.mesh.position.y, to = c.lift || 0
+      if (Math.abs(to - y) > 0.01) {
+        const ny = y + (to - y) * 0.2
+        c.mesh.position.y = c.glow.position.y = ny
+        if (c.key === this._hoverKey) this.hoverHalo.position.y = ny
+      }
+    }
     this.renderer.render(this.scene, this.camera)
     this.labels.render(this.scene, this.camera)
   }
@@ -148,11 +304,28 @@ export class CityScene {
   }
 
   _layer(name) {
-    if (!this.layers[name]) { this.layers[name] = new THREE.Group(); this.scene.add(this.layers[name]) }
+    if (!this.layers[name]) { this.layers[name] = new THREE.Group(); this.world.add(this.layers[name]) }
     return this.layers[name]
   }
 
   setLayerVisible(name, v) { if (this.layers[name]) this.layers[name].visible = v }
+
+  // animated vehicles: data = traffic_<run>.json (urban.fcd); null hides them
+  // candKey: the run's candidate, so its cars can ride on its bridge deck
+  setTraffic(data, onTick, candKey) {
+    if (!this.traffic) this.traffic = new Traffic(this._layer('traffic'))
+    this.onTrafficTick = onTick
+    const c = candKey && this.candidates.get(candKey)
+    if (c?.bridge) {
+      const a = c.pts[0], b = c.pts[c.pts.length - 1], L = c.bridge.L
+      const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L
+      this.traffic.lift = (x, z) => c.bridge.h(Math.max(0, Math.min(L, (x - a[0]) * ux + (z - a[1]) * uz)))
+    } else this.traffic.lift = null
+    if (data) this.traffic.load(data)
+    this.traffic.setVisible(!!data)
+    if (!data) this.traffic.playing = false
+    return this.traffic
+  }
 
   build(data, bbox) {
     const proj = this.proj = projection(bbox)
@@ -169,7 +342,7 @@ export class CityScene {
     const g = new THREE.Mesh(new THREE.CircleGeometry(9000, 64).rotateX(-Math.PI / 2),
                              new THREE.MeshLambertMaterial({ color: '#121821' }))
     g.position.y = -0.3
-    this.scene.add(g)
+    this.world.add(g)
     const [x0, z0] = proj([bbox[0], bbox[1]]), [x1, z1] = proj([bbox[2], bbox[3]])
     // slightly lighter ground under the study box
     const pad = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z0 - z1).rotateX(-Math.PI / 2),
@@ -220,14 +393,14 @@ export class CityScene {
   }
 
   _roads(fc, proj) {
-    const casing = [], strip = [], ranges = []
+    const casing = [], strip = [], ranges = [], along = []
     this.roadProps = fc.features.map(f => f.properties)
     fc.features.forEach(f => {
       const p = f.properties, pts = f.geometry.coordinates.map(proj)
       const w = Math.max(1, p.lanes) * LANE_W * (ARTERIAL.test(p.type || '') ? 1 : 0.85), y = roadY(p.type)
       pushRibbon(casing, pts, -0.6, w + 0.6, y - 0.05)
       const start = strip.length / 3
-      const n = pushRibbon(strip, pts, w * 0.1, w * 0.9, y)
+      const n = pushRibbon(strip, pts, w * 0.1, w * 0.9, y, along)
       ranges.push([start, n])
     })
     this.roadRanges = ranges
@@ -238,11 +411,15 @@ export class CityScene {
     cg.setAttribute('position', new THREE.Float32BufferAttribute(casing, 3))
     this._layer('roads').add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color: '#262d39', side: THREE.DoubleSide })))
 
-    const g = new THREE.BufferGeometry()
+    const g = new THREE.BufferGeometry(), nv = strip.length / 3
     g.setAttribute('position', new THREE.Float32BufferAttribute(strip, 3))
-    g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(strip.length), 3))
-    // toneMapped false: data colours must match the legend exactly, not be graded with the scene lighting
-    this.roadMesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false }))
+    // two states per road (before / after) so the GPU can blend them; speeds drive the flow animation
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(nv * 3), 3))
+    g.setAttribute('color2', new THREE.Float32BufferAttribute(new Float32Array(nv * 3), 3))
+    g.setAttribute('speed', new THREE.Float32BufferAttribute(new Float32Array(nv), 1))
+    g.setAttribute('speed2', new THREE.Float32BufferAttribute(new Float32Array(nv), 1))
+    g.setAttribute('along', new THREE.Float32BufferAttribute(along, 2))
+    this.roadMesh = new THREE.Mesh(g, roadMaterial(this.uniforms))
     this._layer('roads').add(this.roadMesh)
   }
 
@@ -280,15 +457,29 @@ export class CityScene {
     layer.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false })))
   }
 
-  // fn(props, index) -> THREE.Color
-  setRoadColors(fn) {
-    const col = this.roadMesh.geometry.attributes.color
+  // fn(props, index) -> THREE.Color; speedFn(props) -> m/s for the flow animation (0 = no flow). One state.
+  setRoadColors(fn, speedFn = () => 0) { this.setRoadStates(fn, speedFn, fn, speedFn) }
+
+  // Two states, blended on the GPU by uMix (0 = A, 1 = B): before / after a candidate.
+  setRoadStates(fnA, spA, fnB, spB) {
+    const at = this.roadMesh.geometry.attributes
     this.roadProps.forEach((p, i) => {
-      const c = fn(p, i), [s, n] = this.roadRanges[i]
-      for (let v = s; v < s + n; v++) col.setXYZ(v, c.r, c.g, c.b)
+      const a = fnA(p, i), b = fnB(p, i), sa = spA(p) || 0, sb = spB(p) || 0, [s, n] = this.roadRanges[i]
+      for (let v = s; v < s + n; v++) {
+        at.color.setXYZ(v, a.r, a.g, a.b); at.color2.setXYZ(v, b.r, b.g, b.b)
+        at.speed.setX(v, sa); at.speed2.setX(v, sb)
+      }
     })
-    col.needsUpdate = true
+    for (const k of ['color', 'color2', 'speed', 'speed2']) at[k].needsUpdate = true
   }
+
+  // blend between the two road states; animate = ease there over ~0.6 s (Before/After buttons), else jump (slider)
+  setMix(v, animate = true) {
+    this._mixTo = v
+    if (!animate) this.uniforms.uMix.value = v
+  }
+
+  setFlow(on) { this.uniforms.uFlow.value = on ? 1 : 0 }
 
   _buildings(fc, proj, bbox) {
     const geoms = [], tmp = new THREE.Color()
@@ -357,7 +548,7 @@ export class CityScene {
     this.hoverHalo.visible = false
     this.hoverHalo.renderOrder = 9
     group.add(this.hoverHalo)
-    const endGeo = new THREE.CylinderGeometry(5, 5, 18, 24)
+    const endGeo = new THREE.CylinderGeometry(1.8, 1.8, 6, 16)
     this.ends = [0, 1].map(() => {
       const m = new THREE.Mesh(endGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false }))
       m.renderOrder = 13
@@ -365,18 +556,53 @@ export class CityScene {
       group.add(m)
       return m
     })
+    const bridges = this._layer('bridges'), decks = []
+    // warm light concrete, so decks read apart from the blue-grey buildings
+    const concrete = new THREE.MeshStandardMaterial({ color: '#d6cbb8', roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide })
+    const PIER = new THREE.CylinderGeometry(1.1, 1.3, 1, 12).translate(0, 0.5, 0)
     for (const c of selected) {
       const pts = c.feature.geometry.coordinates.map(proj)
-      const glow = new THREE.Mesh(ribbonGeometry(pts, -12, 12, 2.4), new THREE.MeshBasicMaterial({
+      const p = c.props, grade = (p.road_crossings || 0) + (p.worksite_crossings || 0) > 0
+      // flat candidates keep their old height; bridges lift the ribbon onto the deck top
+      const br = grade ? bridgePath(pts) : null
+      const path = br ? br.path : pts.map(q => [q[0], 0, q[1]])
+      let deck = null
+      if (br) {
+        const ps = []
+        const n = Math.floor((br.L - 2 * 12) / BRIDGE.pierEvery)
+        for (let i = 0; i <= n; i++) {
+          const s0 = 12 + (n ? i * (br.L - 24) / n : br.L / 2 - 12), hh = br.h(s0) - TH
+          if (hh < 1.5) continue   // too low on the ramp: an embankment, not a pier
+          const t = s0 / br.L, [a, b] = [pts[0], pts[pts.length - 1]]
+          ps.push([a[0] + (b[0] - a[0]) * t, hh, a[1] + (b[1] - a[1]) * t])
+        }
+        deck = new THREE.Group()
+        deck.userData.mat = concrete.clone()
+        deck.add(new THREE.Mesh(sweep(br.path, DECK_SECTION), deck.userData.mat))
+        if (ps.length) {
+          // this bridge's piers: one InstancedMesh (a single draw call however many piers)
+          const inst = new THREE.InstancedMesh(PIER, deck.userData.mat, ps.length), m4 = new THREE.Matrix4()
+          ps.forEach(([x, hh, z], i) => inst.setMatrixAt(i, m4.makeScale(1, hh, 1).setPosition(x, 0, z)))
+          inst.instanceMatrix.needsUpdate = true
+          deck.add(inst)
+        }
+        bridges.add(deck)
+        decks.push(deck)
+      }
+      const lift = br ? 0.15 : 2.6, glowLift = br ? 0.05 : 2.4
+      const glow = new THREE.Mesh(ribbon3(path, -12, 12, glowLift), new THREE.MeshBasicMaterial({
         ...over, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }))
       glow.renderOrder = 8
-      const mesh = new THREE.Mesh(ribbonGeometry(pts, -4, 4, 2.6), new THREE.MeshBasicMaterial({ color: '#cccccc', ...over }))
+      const mesh = new THREE.Mesh(ribbon3(path, -4, 4, lift),
+        plannedStripes(new THREE.MeshBasicMaterial({ color: '#cccccc', ...over }), this.uniforms))
       mesh.renderOrder = 10
       mesh.userData.key = c.key
       group.add(glow, mesh)
       const [a, b] = [pts[0], pts[pts.length - 1]]
-      this.candidates.set(c.key, { mesh, glow, pts, center: new THREE.Vector3((a[0] + b[0]) / 2, 0, (a[1] + b[1]) / 2) })
+      this.candidates.set(c.key, { key: c.key, mesh, glow, pts, path, bridge: br, deck,
+        center: new THREE.Vector3((a[0] + b[0]) / 2, br ? br.top : 0, (a[1] + b[1]) / 2) })
     }
+    this.bridgeCount = decks.length
   }
 
   setCandidateColors(fn) {
@@ -390,10 +616,16 @@ export class CityScene {
       // fade the others hard when one is selected, so their colour is not mistaken for the traffic change on roads;
       // a hovered candidate always lights up, even while faded
       const dim = sel && k !== sel && k !== hov
-      c.mesh.material.opacity = dim ? 0.15 : 1
-      c.glow.visible = !dim
-      c.glow.material.opacity = k === hov ? 0.55 : 0.22
+      // hovering with nothing selected: a spotlight, the others step back
+      const back = !sel && hov && k !== hov
+      c.mesh.material.opacity = dim ? 0.15 : back ? 0.35 : 1
+      c.glow.visible = !dim && !back
+      c.glow.material.opacity = k === hov ? 0.7 : 0.22
+      c.lift = k === hov ? 2.5 : 0   // animated in _frame; small, so the pointer stays on it
+      if (c.deck) c.deck.userData.mat.emissive.copy(k === hov ? c.mesh.material.color : BLACK).multiplyScalar(k === hov ? 0.45 : 0)
       c.mesh.renderOrder = k === sel ? 12 : k === hov ? 11 : 10
+      // ~30 bridges overlap at a few seed junctions: with a selection, show only its deck (and the hovered one)
+      if (c.deck) c.deck.visible = !sel || k === sel || k === hov
     }
   }
 
@@ -406,7 +638,8 @@ export class CityScene {
     this.hoverHalo.visible = !!c
     if (c) {
       this.hoverHalo.geometry.dispose()
-      this.hoverHalo.geometry = ribbonGeometry(c.pts, -6.5, 6.5, 2.9)
+      this.hoverHalo.geometry = ribbon3(c.path, -6.5, 6.5, c.bridge ? 0.3 : 2.9)
+      this.hoverHalo.position.y = c.mesh.position.y
     }
     if (!this.hoverLabel) {
       const el = document.createElement('div')
@@ -418,12 +651,12 @@ export class CityScene {
     this.hoverLabel.visible = !!(lc && text)
     if (lc && text) {
       this.hoverLabel.element.textContent = text
-      this.hoverLabel.position.set(lc.center.x, 22, lc.center.z)
+      this.hoverLabel.position.set(lc.center.x, 22 + lc.center.y, lc.center.z)
     }
     // end markers follow the hovered candidate, then fall back to the selected one
     const show = c || (this._selKey && this.candidates.get(this._selKey))
     this.ends.forEach(m => { m.visible = !!show })
-    if (show) [show.pts[0], show.pts[show.pts.length - 1]].forEach((p, i) => this.ends[i].position.set(p[0], 9, p[1]))
+    if (show) [show.pts[0], show.pts[show.pts.length - 1]].forEach((p, i) => this.ends[i].position.set(p[0], 3, p[1]))
   }
 
   setSelected(key) {
@@ -436,8 +669,8 @@ export class CityScene {
     this.ends.forEach(m => { m.visible = !!c })
     if (!c) return
     this.halo.geometry.dispose()
-    this.halo.geometry = ribbonGeometry(c.pts, -7, 7, 3)
-    ;[c.pts[0], c.pts[c.pts.length - 1]].forEach((p, i) => this.ends[i].position.set(p[0], 9, p[1]))
+    this.halo.geometry = ribbon3(c.path, -7, 7, c.bridge ? 0.25 : 3)
+    ;[c.pts[0], c.pts[c.pts.length - 1]].forEach((p, i) => this.ends[i].position.set(p[0], 3, p[1]))
   }
 
   focus(key) {
@@ -445,7 +678,9 @@ export class CityScene {
     if (!c) return
     const t0 = this.controls.target.clone(), p0 = this.camera.position.clone()
     // aim a little left of the candidate so the detail card (bottom-left) does not cover it
-    const t1 = c.center.clone().add(new THREE.Vector3(-120, 0, 60)), p1 = t1.clone().add(new THREE.Vector3(200, 620, 420))
+    // bridges: a low, oblique view so the deck, ramps and piers read as 3D; flat roads: the usual top-down view
+    const t1 = c.center.clone().add(c.bridge ? new THREE.Vector3(-40, 0, 20) : new THREE.Vector3(-120, 0, 60))
+    const p1 = t1.clone().add(c.bridge ? new THREE.Vector3(160, 110, 230) : new THREE.Vector3(200, 620, 420))
     const start = performance.now()
     this._tween = () => {
       const k = Math.min(1, (performance.now() - start) / 1000), e = 1 - Math.pow(1 - k, 3)

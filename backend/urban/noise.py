@@ -25,10 +25,11 @@ FULL = 3600   # urban.evaluate's default DURATION
 
 def run_dir(d, tag, sim, seed):
     # reuse urban.evaluate's seed-42 runs only at the full duration; short test runs must never write into them.
-    # Candidate variants (CAND_LANES/CAND_KMH) get their own dirs; the baseline has no candidate, so it is shared.
+    # Candidate variants (CAND_LANES/CAND_KMH) get their own dirs (urban.evaluate names them the same way); the
+    # baseline has no candidate, so it is shared.
     if tag != "base":
         tag += VARIANT
-    if seed == SEED and DURATION == FULL and not (VARIANT and tag != "base"):
+    if seed == SEED and DURATION == FULL:
         return d / "sim" / "scenarios" / f"{tag}_{sim}"
     return d / "sim" / "noise" / (f"{tag}_{sim}_s{seed}" + ("" if DURATION == FULL else f"_d{DURATION}"))
 
@@ -39,9 +40,9 @@ def noise(area="hebbal", seeds=(42, 1, 2, 3, 4), cands=(), meso=False, workers=2
     sim = "meso" if meso else "micro"
     jobs, keys = [], []
     for s in seeds:
-        jobs.append((base, routes, box, None, incoming, run_dir(d, "base", sim, s), meso, s)); keys.append(("base", s))
+        jobs.append((base, routes, box, None, incoming, run_dir(d, "base", sim, s), sim, s)); keys.append(("base", s))
         for i in cands:
-            jobs.append((base, routes, box, rows.loc[i], incoming, run_dir(d, f"c{i:02d}", sim, s), meso, s))
+            jobs.append((base, routes, box, rows.loc[i], incoming, run_dir(d, f"c{i:02d}", sim, s), sim, s))
             keys.append((i, s))
     res = dict(zip(keys, run_all(jobs, workers)))
 
@@ -77,6 +78,10 @@ def summary(df):
         sm, ssd, *_ = spread(list(g.score))
         out["cands"][int(run[1:])] = {"n": len(g), "dT": dm, "dT_sd": dsd, "dT_min": dlo, "dT_max": dhi,
                                       "score": sm, "score_sd": ssd, "cand_vph": float(g.cand_vph.mean()),
+                                      # all score terms (dQ averaged; dC, L, P are fixed per candidate), so the UI
+                                      # can re-score the seed average with the user's weights
+                                      "dQ": float(g.dQ.mean()), "dQ_sd": spread(list(g.dQ))[1],
+                                      "dC": float(g.dC.iloc[0]), "L": float(g.L.iloc[0]), "P": float(g.P.iloc[0]),
                                       "verdict": verdict(list(g.dT))}
     return out
 

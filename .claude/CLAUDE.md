@@ -90,7 +90,93 @@ and shows everything in an interactive 3D interface.
     pressure). Only 3 score positive: c25 (+7.1, dT +5.7 %, 43 veh/h), c22 (+4.6, 286 veh/h, 114 m), c24 (+2.9,
     41 veh/h). Everything carrying 600+ veh/h is much worse (dT -10 to -80 %, Braess). The low-use positives sit
     inside the noise floor: c36-c39 with ~55 veh/h range from -5 to -17 %. c22 is the only plausible real gain.
-    The micro validation (c25, c22, c24) was killed for low memory during `base_micro`; not yet rerun.
+    Micro validation DONE 2026-11-23 (`scenarios_micro.csv`): base_micro mean travel 392 s, time loss 172.6 s,
+    13 teleports, 1,165 s/run. ALL THREE WORSE: c25 dT -14.0 % (41 veh/h), c24 -18.9 % (36 veh/h), c22 -26.7 %
+    (276 veh/h); teleports 25-44 vs 13. A 40 veh/h road cannot cost 14 % system-wide, so either noise (rerouting
+    chaos) or the new junction leg re-signs right-of-way at u/v for all traffic there. No candidate shows a real gain.
+- Phase 5 code (2026-11-23): `evaluate.py --workers P` (ProcessPoolExecutor, one scenario per task; `simulate` takes
+  incoming edge ids, not the net). `urban/parallel.py` benchmark (DURATION=900 meso, N=16, P=1,2,4,8, fresh
+  `sim/bench/p{P}/`, checks results identical to sequential) -> `parallel.csv`. Not yet run. Machine: 16 cores /
+  24 threads, 15.7 GB RAM. Never run two sims at once: `make_demand` rewrites the shared route files in `sim/`.
+  - BENCHMARK DONE (2026-11-24, `parallel.csv`, macro, baseline + 16 candidates = 17 scenarios, user's own terminal):
+    P=1 1,430 s wall (84 s/run), P=2 715 s (speedup 2.00, efficiency 1.00), P=4 395 s (speedup 3.62, efficiency 0.90,
+    utilization 0.93), results identical to sequential at every P. P=4 loss = 17 jobs on 4 workers (last wave
+    part-empty) + slight per-run slowdown (84 -> 86 s). `parallel.py` resumes: finished rounds keep round.json +
+    compare.csv in sim/bench/p<P>/.
+  - NOISE FLOOR (2026-11-23, `evaluate.py --noise 6 --workers 2`, `noise_meso.csv`): meso baseline, same demand,
+    SUMO seeds 42-47. Mean time loss 141.4 / 151.5 / 144.7 / 155.3 / 158.2 / 171.3 s: std 7.6 % in dT, 19.4 % in
+    dQ. Seed 42 (the baseline every candidate was compared to) is the LUCKIEST draw, about 8 % below the seed mean,
+    so single-seed candidates look systematically worse. Every meso positive (max +5.7 %) and the micro -14..-19 %
+    on ~40 veh/h roads are inside noise. Only the big Braess losses (-30 % and worse, 600+ veh/h) are real.
+    Detecting a 3 % effect at this variance needs ~40 seeds per scenario: single-seed ranking is meaningless.
+    2 workers ran ~480-540 s per meso run.
+    Rerouting is NOT the noise source (2026-11-23, `REROUTE=0 ... --noise 6`, `noise_meso_no_reroute.csv`): with
+    free-flow routes only, std got WORSE (dT 8.5 %, dQ 47.6 %), 34-59 teleports, only 8,361-9,231 of 9,252 arrived
+    (gridlock), 1,000-2,000 s per run. Likely cause (unproven): the network runs near capacity (flyover calibrated
+    to its survey flow), so small random differences grow into different queues. Note mean_time_loss counts arrived
+    vehicles only, so a run with more stuck vehicles can look better.
+  - USER DECISION 2026-11-23: model traffic as a stream. Screening = MACRO static assignment, `sim.assign()` =
+    SUMO `marouter --assignment-method UE`, deterministic (repeat runs byte-identical), ~2 min/scenario (only 31 s is
+    routing). `evaluate.py` default `--screen macro` (meso still via `--screen meso`), `--micro K` default 0.
+    Results `scenarios_macro.csv`; old meso screen renamed `scenarios_meso.csv`. Per-edge `netload.xml` kept in each
+    scenario dir (for the 3D heatmap). Macro metrics: delay per edge = q * tt * (1 - speedRelative); mean_time_loss
+    = total delay / vehicles. Macro baseline: mean travel 651 s (vs micro 392), flyover way 377832181 carries
+    2,691 veh/h (target 3,225) at v/c 112 % and 21 % of limit (~13 km/h, observed 15-20). Only 23 of 6,281 loaded
+    edges are over capacity, worst = arterial ENTRY edges (4,052 veh/h, v/c 169 %): demand exceeds entry capacity,
+    same in every scenario, so it inflates the baseline and dilutes dT %. marouter capacity ~800 veh/h/lane on the
+    flyover vs survey 1,100. Smoke test: c00/c01 dT +3.0/+2.4 % system-wide but dQ -46/-55 % (1,500-1,700 veh/h
+    pulled into the box).
+  - MACRO SCREEN COMPLETE 2026-11-23 (40 candidates, 4 workers, median 162 s/run vs ~120 s alone). Clear trade-off,
+    no noise: dT vs candidate flow corr +0.72, dQ vs flow -0.92. Big shortcuts (c02/c08/c33/c09/c13, 1,900-2,500
+    veh/h) cut network delay 6.4-7.5 % but add ~40 % box delay (through traffic diverted onto local streets).
+    Only 13/40 improve both. Winners: c23/c22/c21 (all from junction 2408528584, 108-126 m, ~430 veh/h):
+    dT +1.1 %, dQ +3.0 %, score 2.3-2.9. c22 was also the meso screen's only plausible gain. Next tier c24/c25/c03/c04
+    (~60 veh/h): dT +0.2 %, dQ +1.6 %.
+  - Merge 2026-11-23 (branch `feat/macro` on top of PR #1): `evaluate.py --noise` removed, use `urban.noise`
+    (paired multi-seed). `simulate(..., mode, seed)` takes "macro"|"meso"|"micro" (noise.py updated). export.py
+    reads scenarios_<macro|meso|micro>.csv and adds a "macro" key; the UI still reads "meso" (switching it to macro
+    is a frontend task). export's per-scenario heatmap stats read edges.xml only, not macro netload.xml (TODO).
+    ALL macro/meso numbers above are on the OLD net (before the untagged-speed fix below).
+  - Rerun on the NEW net (Windows, 2026-11-24): old results moved to data/hebbal/archive_v1_default_speeds/.
+    Micro baseline matches the Mac: flyover 3,241 veh/h, 8,966 arrived, 20 teleports, time loss 133.2 s (sumo 1,208 s
+    here). Candidates: 90 feasible, 40 selected from 15 seeds, 34 cross the metro worksite (candidate indices differ
+    from the old net). Macro screen COMPLETE (40/40, `scenarios_macro.csv`, exported to scenarios.json "macro"); all 40
+    cut network delay. Macro baseline mean travel 750.7 s. Same pattern: 1,000-2,400 veh/h shortcuts cut network delay
+    2-4.4 % but add 5-19 % box delay. Both-positive winners: c19 (4952656449, 165 m, 297 veh/h, dT +1.3, dQ +7.5,
+    score 4.98), c01/c00 (2460375002, ~260 m, 86 veh/h, dT +1.2, dQ +7.6), c15/c14/c13 (2408528584, 108-126 m,
+    ~480 veh/h, dT +1.6, dQ +3.5: the same junction as the old net's winners c21-c23).
+- LEFT-HAND traffic + 2-lane candidates (user, 2026-11-24): `build_net` adds `--lefthand` (net element carries
+  lefthand="true"; the untagged-speed 2nd pass keeps it). Vs the RHT net: 10 TLS and flyover edges unchanged,
+  9,547 vs 9,546 edges, 28,847 vs 28,850 connections (ramp guessing: the 94 m Tumkur Road Exit added off-ramp edge
+  is gone, RT Nagar Main Road gained 2 x 13 m pieces). Candidate default now 2 lanes each way, 50 km/h
+  (`DEFAULT_CAND`); other variants via CAND_LANES/CAND_KMH get `_l<lanes>v<kmh>` in scenario dirs and CSVs
+  (evaluate and noise). RHT results archived in data/hebbal/archive_v2_righthand/.
+  - LHT recalibration: FLYOVER_RATE 3450 gave flyover 3,648 veh/h; default now 3030 -> 3,265 veh/h, 8,831 arrived,
+    38 teleports. Metro worksite crossing penalty raised (user): P_COST 22 = 5.5 score points per crossing; 34/40
+    candidates cross it, incl. all old winners (c23 2 crossings, c18-c20), so few non-crossing roads score > 0.
+  - ISOLATION (2026-11-24, `urban.isolate`, micro, same demand, `isolate.csv`): flyover speed is fine (user); worry
+    = congested roads crawl. One change at a time vs ref: gap10 (car minGap 1.0), mix (60 % moto 2.2 m gap 0.5 /
+    35 % car / 5 % bus, same vehicle count), mixgap. Time loss 193 -> 173 / 164 / 145 s, teleports 38 -> 30 / 7 / 7,
+    top-10 bottleneck median 5.6 -> 6.5 km/h. Gains land on moderate roads (Bellary Rd 31 -> 41-49 km/h); the true
+    stalls do NOT move in any variant (flyover loop 1422993566 3-4, 238204954 ~1.4, Anandnagar -133882079#0 ~1,
+    1423056973 ~0.4, ORR 1073384218#0 3-4 km/h), so they are junction/topology/signal problems, not vehicle params.
+    Mix drops flyover flow to ~2,450 PCU/h: adopting it needs recalibration in PCU. No TomTom data yet (no key).
+  - JUNCTION ROUND (2026-11-24, `isolate2.log`): stall causes = (1) flyover loop 1422993566 merges as minor into
+    3-lane Bellary Rd (3,265 veh/h) at priority node 13052245180, no gap; (2) local 1-lane tertiary ring (238204954,
+    Anandnagar, 1092259723, 327073709) all-minor junctions + U-turns, circular wait; (3) ORR TLS
+    cluster_11951813051_335663834 equal-split 33/90 s. Results vs ref (time loss 193 s, 38 teleports):
+    zipper (node -> type zipper) 101 s, 7 teleports, loop 3 -> 27 km/h, Anandnagar 0.5 -> 10; jb20
+    (--ignore-junction-blocker 20) alone ~no change; act (all TLS actuated) worse, 220 s; all3 89 s, 8 teleports,
+    frontage 238204954 1.7 -> 40 km/h, top-10 median 27 km/h. ORR 1073384218#0 stays 3-4 km/h in every variant.
+  - ZIPPER BASELINE ADOPTED (user, 2026-11-24): micro flyover 3,186 veh/h, 7 teleports, time loss 88 s. Pre-zipper
+    scenarios archived in data/hebbal/archive_v3_prezipper/. New candidates: 89 feasible, 40 from 14 seeds.
+    Worksite rule changed (user: roads ALONGSIDE the metro are preferred): `candidates.worksite_crossings()` counts true
+    centreline crossings once per corridor crossing (no 15 m proximity charge); 89 -> 35 crossings, 32/40 cross.
+  - MICRO 5-SEED CHECK of the macro top 10 (`noise_micro.csv`, baseline 87.1 s sd 4.7 %): macro and micro DISAGREE.
+    Only c39 (11395414076, 72 m, no crossing, ~195 veh/h) is a clean real gain: dT +9.4 +- 4.2 %, dQ -0.7 (noise),
+    score +9.4. c27 dT +8.5 but box queueing +36 %. Macro #1-3 c17/c16/c15 (junction 2408528584) are WORSE in micro
+    (dT -5..-8 %, box queueing ~doubles); c11/c22 (540-560 veh/h) -28/-32 % (Braess). c18/c19/c36 within noise.
+    Lesson: macro has no junction behaviour, so rank on micro validation of a macro shortlist.
   - OPEN: c03/c04 carry about 25 veh/h yet show dT -3.4 %, so the meso noise floor from rerouting chaos is a few %.
     Consider multiple seeds. c02/c07 report a mean duration identical to baseline (357.97) while timeLoss/routeLength
     differ. Suspect; dT may be better taken from mean_time_loss.

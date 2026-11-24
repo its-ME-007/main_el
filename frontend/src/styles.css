@@ -200,3 +200,43 @@ details[open] > summary h2::before { transform: rotate(90deg); }
 .notice code { white-space: pre-wrap; word-break: break-all; }
 .kv.seeds th { width: 38%; }
 .kv.seeds td .small { margin-top: 2px; }
+.plegend { display: flex; gap: 14px; margin-top: 8px; color: var(--muted); }
+.plegend .sw { display: inline-block; width: 16px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 2px solid var(--accent); }
+.plegend .sw.ideal { border-top: 2px dashed var(--muted); }
+.chart .measured { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart .ideal { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.7; }
+.chart .pt { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+.ptable { margin-top: 10px; font-variant-numeric: tabular-nums; }
+.ptable th, .ptable td { width: auto; text-align: right; padding: 3px 4px; }
+.ptable th:first-child, .ptable td:first-child { text-align: left; }
+.ptable thead th { color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
+.ptable tr.hovered td { background: rgba(110, 168, 255, 0.08); }
+.parallel code { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.tooltip.cand { min-width: 230px; padding: 10px 12px; }
+.tooltip .tt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tooltip .tt-score { font-size: 20px; font-weight: 700; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
+.tooltip .tt-score span { font-size: 11px; font-weight: 400; color: var(--muted); }
+.tooltip .tt-kv { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+.tooltip .tt-kv th { text-align: left; font-weight: 400; color: var(--muted); padding: 1px 10px 1px 0; white-space: nowrap; }
+.tooltip .tt-kv td { padding: 1px 0; font-variant-numeric: tabular-nums; }
+.tooltip .tt-hint { margin-top: 6px; font-size: 10.5px; color: var(--muted); }
+.traffic-panel .player { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+.traffic-panel .player input[type=range] { flex: 1; }
+.traffic-panel .play { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--accent);
+  color: #0b0f16; font-size: 11px; cursor: pointer; flex: none; }
+.traffic-panel .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.traffic-panel .rates { display: flex; gap: 2px; }
+.traffic-panel .rates button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 5px;
+  font: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; }
+.traffic-panel .rates button.on { color: var(--text); border-color: var(--accent); }
+.traffic-panel .users { margin: 4px 0 10px; padding: 8px 10px; border-radius: 8px; background: rgba(62, 230, 255, 0.07);
+  border: 1px solid rgba(62, 230, 255, 0.25); }
+.traffic-panel .sw-hl { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: #3ee6ff; margin: 0 4px 0 2px;
+  vertical-align: -1px; }
+.res-toggle { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.res-toggle .seg { flex: 1; }
+.res-toggle .seg button .muted { margin-left: 4px; font-size: 10.5px; }
+.ranking li.divider { cursor: default; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 6px; }
+.blend { display: block; margin: 10px 0 4px; }
+.blend .row { display: flex; justify-content: space-between; }
+.blend input[type=range] { width: 100%; }
