@@ -50,7 +50,7 @@ def bench(area="hebbal", n=16, workers=(2, 4)):
         ref = res if ref is None else ref
         r = {**{k: v for k, v in r.items() if k != "n"}, "identical": res.equals(ref)}
         rows_out.append(r)
-        print(f"P={p}: {wall:6.0f} s wall, {r['per_run_s']:5.1f} s/run, identical={r['identical']}", flush=True)
+        print(f"P={p}: {r['wall_s']:6.0f} s wall, {r['per_run_s']:5.1f} s/run, identical={r['identical']}", flush=True)
     out = pd.DataFrame(rows_out)
     ts = out.wall_s.iloc[0]
     out["speedup"] = ts / out.wall_s

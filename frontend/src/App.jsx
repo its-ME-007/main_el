@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CityScene } from './scene.js'
 import { AREA, areaName, loadAll, loadComparison } from './data.js'
 import ResultsChart from './ResultsChart.jsx'
+import ParallelChart from './ParallelChart.jsx'
+import TrafficPanel from './TrafficPanel.jsx'
 import { CHANGE_LEGEND, NO_TRAFFIC, SCORE_LEGEND, SPEED_LEGEND, changeColor, cssGradient, scoreColor, speedColor } from './colors.js'
 
 // Defaults = WEIGHTS in backend/urban/evaluate.py, so the default ranking equals the backend's.
@@ -17,7 +19,9 @@ const scoreOf = (r, w) => r ? Object.keys(SIGN).reduce((s, k) => s + SIGN[k] * w
 
 const LAYERS = [
   ['roads', 'Roads (traffic)', true], ['roadLabels', 'Road names', true], ['buildings', 'Buildings', true],
-  ['candidates', 'Candidate roads', true], ['construction', 'Metro worksites', true],
+  ['flow', 'Traffic flow animation', true], ['candidates', 'Candidate roads', true],
+  ['bridges', 'Bridges (grade-separated candidates)', true],
+  ['construction', 'Metro worksites', true],
   ['obstacles', 'Lakes, parks, no-build zones', true], ['studyBox', 'Study box', true],
   ['feasible', 'Feasible, not selected', false], ['rejected', 'Rejected pairs', false],
 ]
@@ -26,10 +30,12 @@ const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : Number(v).toLoc
 const signed = (v, d = 1) => v == null ? '—' : `${v > 0 ? '+' : ''}${fmt(v, d)}`
 const label = c => `Candidate c${String(c.meso?.cand ?? c.micro?.cand ?? '?').padStart(2, '0')}`
 const short = c => label(c).replace('Candidate ', '')
-// the most trustworthy result for a candidate: the microsim check where it exists, else the meso screen
-const best = c => c.micro ?? c.meso
+// the most trustworthy result for a candidate: the microsim check where it exists, else the fast screen (macro/meso)
+const best = c => seedRec(c) ?? c.micro ?? c.meso
 // repeated-run result for the candidate as evaluated (the first, default variant), if urban.noise ran it
 const seedRun = c => c.noise?.[0]
+// the seed average as a score record (all five terms), when the export has them: the most trustworthy result
+const seedRec = c => (seedRun(c)?.dQ != null ? seedRun(c) : null)
 const seedTag = n => n.verdict !== 'real effect' ? ['', 'no effect'] : n.dT > 0 ? ['ok', 'better'] : ['fail', 'worse']
 
 export default function App() {
@@ -41,23 +47,37 @@ export default function App() {
   const [mode, setMode] = useState('baseline')        // baseline | after | change
   const [simPref, setSimPref] = useState('meso')
   const [cmp, setCmp] = useState(null)
+  const [mixVal, setMixVal] = useState(0)    // 0 = before, 1 = after (blended on the GPU)
+  const animMix = useRef(true)               // buttons ease the blend, the slider sets it directly
   const [hover, setHover] = useState(null)
   const [road, setRoad] = useState(null)
   const [tab, setTab] = useState('ranking')
+  const [res, setRes] = useState(null)   // which results rank the list: 'macro' (fast screen) | 'micro' (validated)
   const [w, setW] = useState(DEFAULT_W)
 
   const byKey = useMemo(() => new Map((data?.selected || []).map(c => [c.key, c])), [data])
   const sel = selKey ? byKey.get(selKey) : null
   const sim = simPref === 'micro' && sel?.micro ? 'micro' : 'meso'
+  const simName = sim === 'meso' ? (data?.screen || 'meso') : sim   // display name of the fast screen
   const rec = sel?.[sim]
   const custom = Object.keys(DEFAULT_W).some(k => w[k] !== DEFAULT_W[k])
 
-  // ranking: validated candidates by their micro score, the rest by meso, all with the current weights
-  const ranked = useMemo(() => (data?.selected || []).filter(c => c.meso)
-    .map(c => ({ ...c, score: scoreOf(best(c), w), mesoScore: scoreOf(c.meso, w), microScore: scoreOf(c.micro, w) }))
+  // every screened candidate, with both scores under the current weights
+  const scored = useMemo(() => (data?.selected || []).filter(c => c.meso).map(c => {
+    const microRec = seedRec(c) ?? c.micro
+    return { ...c, microRec, mesoScore: scoreOf(c.meso, w), microScore: scoreOf(microRec, w) }
+  }), [data, w])
+  const hasMicroRes = scored.some(c => c.microRec)
+  const resMode = res ?? (hasMicroRes ? 'micro' : 'macro')
+  // ranking by the chosen results: macro = all screened; micro = only the validated ones (the rest listed after)
+  const ranked = useMemo(() => scored
+    .filter(c => resMode === 'macro' || c.microRec)
+    .map(c => resMode === 'micro' ? { ...c, score: c.microScore, rec: c.microRec } : { ...c, score: c.mesoScore, rec: c.meso })
     .sort((a, b) => b.score - a.score)
-    .map((c, i) => ({ ...c, rank: i + 1 })), [data, w])
-  const rankOf = useMemo(() => new Map(ranked.map(c => [c.key, c])), [ranked])
+    .map((c, i) => ({ ...c, rank: i + 1 })), [scored, resMode])
+  const unchecked = useMemo(() => resMode === 'micro' ? scored.filter(c => !c.microRec)
+    .map(c => ({ ...c, score: null, rec: c.meso, rank: null })) : [], [scored, resMode])
+  const rankOf = useMemo(() => new Map([...ranked, ...unchecked].map(c => [c.key, c])), [ranked, unchecked])
 
   // scene + data, once
   useEffect(() => {
@@ -84,7 +104,7 @@ export default function App() {
       if (hit) setSelKey(hit.key)
       if (['after', 'change'].includes(q.get('view')) || (q.get('view') === 'live' && d.live)) setMode(q.get('view'))
       if (q.get('sim') === 'micro') setSimPref('micro')
-      if (q.get('tab') === 'chart') setTab('chart')
+      if (['chart', 'parallel'].includes(q.get('tab'))) setTab(q.get('tab'))
     }).catch(e => setError(String(e.message || e)))
     return () => s.dispose()
   }, [])
@@ -95,7 +115,9 @@ export default function App() {
     sceneRef.current?.setCandidateColors(k => scoreColor(rankOf.get(k)?.score))
   }, [data, rankOf])
 
-  useEffect(() => { for (const [k, v] of Object.entries(layers)) sceneRef.current?.setLayerVisible(k, v) }, [layers, data])
+  useEffect(() => {
+    for (const [k, v] of Object.entries(layers)) k === 'flow' ? sceneRef.current?.setFlow(v) : sceneRef.current?.setLayerVisible(k, v)
+  }, [layers, data])
 
   useEffect(() => {
     sceneRef.current?.setSelected(selKey)
@@ -104,9 +126,9 @@ export default function App() {
 
   useEffect(() => {
     setCmp(null)
-    if (!sel) { if (data) setMode('baseline'); return }
+    if (!sel) { if (data) { setMode('baseline'); setMixVal(0) } return }
     let live = true
-    loadComparison(sel.meso?.cand ?? sel.micro?.cand, sim).then(c => live && setCmp(c)).catch(() => live && setCmp({ missing: true }))
+    loadComparison(sel.meso?.cand ?? sel.micro?.cand, sim === 'meso' ? data.screen : sim).then(c => live && setCmp(c)).catch(() => live && setCmp({ missing: true }))
     return () => { live = false }
   }, [selKey, sim])
 
@@ -124,27 +146,38 @@ export default function App() {
       s.setRoadColors(p => {
         const b = cmp.before[p.id]?.time_loss || 0, a = cmp.after[p.id]?.time_loss || 0
         return a === 0 && b === 0 ? NO_TRAFFIC : changeColor(a - b)
-      })
+      }, p => cmp.after[p.id]?.speed || 0)
+    } else if (ok) {
+      // before and after both on the GPU; uMix (the blend) picks between them
+      const col = st => p => st[p.id] ? speedColor(st[p.id].speed_rel) : NO_TRAFFIC
+      const spd = st => p => st[p.id]?.speed || 0
+      statsRef.current = { kind: 'speed', stats: mode === 'after' ? cmp.after : cmp.before }
+      s.setRoadStates(col(cmp.before), spd(cmp.before), col(cmp.after), spd(cmp.after))
     } else {
-      const stats = mode === 'after' && ok ? cmp.after : ok ? cmp.before : data.edgeStats
+      const stats = data.edgeStats
       statsRef.current = { kind: 'speed', stats }
-      s.setRoadColors(p => stats[p.id] ? speedColor(stats[p.id].speed_rel) : NO_TRAFFIC)
+      s.setRoadColors(p => stats[p.id] ? speedColor(stats[p.id].speed_rel) : NO_TRAFFIC, p => stats[p.id]?.speed || 0)
     }
   }, [data, cmp, mode])
 
+  useEffect(() => { sceneRef.current?.setMix(mode === 'change' ? 0 : mixVal, animMix.current) }, [mixVal, mode, data])
+
   const pending = (data?.selected || []).filter(c => !c.meso)
-  const improving = ranked.filter(c => c.mesoScore > 0).length
-  const validated = ranked.filter(c => c.micro)
+  const improving = scored.filter(c => c.mesoScore > 0).length
+  const validated = scored.filter(c => c.microRec)
+  // passes = better under the current weights, and (for seed runs) not just noise
+  const passes = c => c.microScore > 0 && (!seedRec(c) || seedRun(c).verdict === 'real effect')
   const legend = mode === 'change' && cmp && !cmp.missing ? CHANGE_LEGEND : SPEED_LEGEND
   const viewLabel = mode === 'live' ? `Real traffic from TomTom, ${data?.live?.fetched_at?.replace('T', ' ')} IST`
     : !sel ? 'Baseline traffic (microsim)'
-    : mode === 'baseline' ? `Before: baseline (${sim})` : mode === 'after' ? `After: with ${label(sel)} (${sim})` : `Change with ${label(sel)} (${sim})`
-  const chartRows = ranked.map(c => ({ key: c.key, name: short(c), score: c.score, vph: best(c).cand_vph, dT: best(c).dT, micro: !!c.micro }))
+    : mixVal > 0.02 && mixVal < 0.98 && mode !== 'change' ? `Blend: ${Math.round(mixVal * 100)} % of the way to ${label(sel)} (${simName})`
+    : mode === 'baseline' ? `Before: baseline (${simName})` : mode === 'after' ? `After: with ${label(sel)} (${simName})` : `Change with ${label(sel)} (${simName})`
+  const chartRows = ranked.map(c => ({ key: c.key, name: short(c), score: c.score, vph: c.rec.cand_vph, dT: c.rec.dT, micro: resMode === 'micro' }))
   const select = k => { setSelKey(k); setRoad(null) }
   // list rows and chart dots light up the road on the map, with a floating label
   const hoverCand = k => {
     const c = k && rankOf.get(k)
-    sceneRef.current?.setHovered(k, c ? `${short(c)} · ${signed(c.score)}` : null)
+    sceneRef.current?.setHovered(k, c ? `${short(c)} · ${c.score == null ? 'not checked' : signed(c.score)}` : null)
   }
 
   return (
@@ -159,43 +192,68 @@ export default function App() {
         </header>
         {error && <div className="error">Could not load data: {error}<br />Run <code>uv run python -m urban.export {AREA}</code> in <code>backend/</code>.</div>}
         {!data && !error && <div className="muted">Loading city…</div>}
-        {data && !ranked.length && (
+        {data && !scored.length && (
           <div className="notice">
             <b>Not simulated yet.</b> The map and roads are real; traffic and candidate roads appear once the pipeline
             has run for this area:
             <code>{['sim', 'candidates', 'evaluate', 'export'].map(m => `uv run python -m urban.${m} ${AREA}`).join('\n')}</code>
           </div>
         )}
-        {data && ranked.length > 0 && <>
+        {/* the benchmark does not depend on candidate results, so show it even before they exist */}
+        {data && !scored.length && data.parallel && <ParallelChart rows={data.parallel} />}
+        {data && scored.length > 0 && <>
           <div className="summary">
-            <div><b>{ranked.length}<span className="of">/{data.selected.length}</span></b><span>candidates simulated</span></div>
+            <div><b>{scored.length}<span className="of">/{data.selected.length}</span></b><span>candidates simulated</span></div>
             <div><b className={improving ? 'good' : ''}>{improving}</b><span>improve in fast screen</span></div>
-            <div><b className={validated.some(c => c.microScore > 0) ? 'good' : ''}>{validated.filter(c => c.microScore > 0).length}
+            <div><b className={validated.some(passes) ? 'good' : ''}>{validated.filter(passes).length}
               <span className="of">/{validated.length}</span></b><span>pass micro check</span></div>
           </div>
+          {hasMicroRes && (
+            <div className="res-toggle">
+              <span className="muted small">Results</span>
+              <div className="seg small">
+                <button className={resMode === 'macro' ? 'on' : ''} onClick={() => setRes('macro')}>
+                  Macro screen <span className="muted">{scored.length}</span></button>
+                <button className={resMode === 'micro' ? 'on' : ''} onClick={() => setRes('micro')}>
+                  Micro check <span className="muted">{validated.length}</span></button>
+              </div>
+            </div>
+          )}
           <div className="tabs">
             <button className={tab === 'ranking' ? 'on' : ''} onClick={() => setTab('ranking')}>Ranking</button>
             <button className={tab === 'chart' ? 'on' : ''} onClick={() => setTab('chart')}>Chart</button>
+            <button className={tab === 'parallel' ? 'on' : ''} onClick={() => setTab('parallel')}>Parallel</button>
           </div>
+          {tab === 'parallel' && <ParallelChart rows={data.parallel} />}
           {tab === 'chart' && <ResultsChart rows={chartRows} selKey={selKey} onSelect={select} onHover={hoverCand} />}
           {tab === 'ranking' && <>
-            <p className="muted small rank-note">Micro score where validated, otherwise the fast meso screen; tags show repeated-run results.{custom && ' Custom weights.'}</p>
+            <p className="muted small rank-note">{resMode === 'micro'
+              ? `Validated: average of ${seedRun(validated.find(seedRun) || {})?.n ?? 5} microsimulation runs per candidate (detailed, with junctions). The rest were only screened.`
+              : `Fast ${data.screen} screen: all ${scored.length} candidates, one deterministic run each (no junction behaviour).`}{custom && ' Custom weights.'}</p>
             <ol className="ranking">
               {ranked.map(c => (
                 <li key={c.key} onClick={() => select(c.key)}
                     className={[c.key === selKey && 'active', hover?.hit?.key === c.key && 'hovered'].filter(Boolean).join(' ')}
                     onMouseEnter={() => hoverCand(c.key)} onMouseLeave={() => hoverCand(null)}
-                    title={c.micro ? `meso ${signed(c.mesoScore)} · micro ${signed(c.microScore)}` : `meso ${signed(c.mesoScore)}`}>
+                    title={c.micro ? `${data.screen} ${signed(c.mesoScore)} · micro ${signed(c.microScore)}` : `${data.screen} ${signed(c.mesoScore)}`}>
                   <span className="rank">{c.rank}</span>
-                  <span className="name">{short(c)}{seedRun(c)
+                  <span className="name">{short(c)}{resMode === 'micro' && seedRun(c)
                     ? <em className={`tag ${seedTag(seedRun(c))[0]}`} title={`${seedRun(c).n} seeds, ${seedRun(c).sim}sim`}>
-                        {seedRun(c).n} seeds: {seedTag(seedRun(c))[1]}</em>
-                    : c.micro && (c.microScore > 0
+                        {seedTag(seedRun(c))[1]}</em>
+                    : resMode === 'micro' && c.micro && (c.microScore > 0
                     ? <em className="tag ok">micro ✓</em> : <em className="tag fail">micro ✗</em>)}</span>
                   <span className="sbar"><span style={{
                     width: `${Math.min(100, 100 * Math.log10(1 + Math.abs(c.score)) / Math.log10(301))}%`,
                     background: `#${scoreColor(c.score).getHexString()}` }} /></span>
                   <span className={`score ${c.score > 0 ? 'good' : 'bad'}`}>{signed(c.score)}</span>
+                </li>
+              ))}
+              {unchecked.length > 0 && <li className="divider muted small">Not checked in micro ({unchecked.length}): macro score</li>}
+              {[...unchecked].sort((a, b) => b.mesoScore - a.mesoScore).map(c => (
+                <li key={c.key} className="pending" onClick={() => select(c.key)}
+                    onMouseEnter={() => hoverCand(c.key)} onMouseLeave={() => hoverCand(null)}>
+                  <span className="rank">·</span><span className="name">{short(c)}</span>
+                  <span className="muted small">macro {signed(c.mesoScore)}</span>
                 </li>
               ))}
               {pending.map(c => <li key={c.key} className="pending"><span className="rank">·</span><span className="name">{c.props.u} → {c.props.v}</span><span className="muted">not run</span></li>)}
@@ -209,9 +267,17 @@ export default function App() {
           <h2>View</h2>
           <div className="seg">
             {[['baseline', 'Before'], ['after', 'After'], ['change', 'Change']].map(([k, t]) => (
-              <button key={k} disabled={k !== 'baseline' && !sel} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{t}</button>
+              <button key={k} disabled={k !== 'baseline' && !sel} className={mode === k ? 'on' : ''}
+                      onClick={() => { setMode(k); if (k !== 'change') { animMix.current = true; setMixVal(k === 'after' ? 1 : 0) } }}>{t}</button>
             ))}
           </div>
+          {sel && cmp && !cmp.missing && mode !== 'change' && mode !== 'live' && (
+            <label className="blend">
+              <span className="row small"><span className="muted">Before</span><span className="muted">fade</span><span className="muted">After</span></span>
+              <input type="range" min="0" max="1" step="0.01" value={mixVal} aria-label="Blend between before and after"
+                     onChange={e => { const v = Number(e.target.value); animMix.current = false; setMixVal(v); setMode(v >= 0.5 ? 'after' : 'baseline') }} />
+            </label>
+          )}
           {data?.live && (
             <button className={`live-btn ${mode === 'live' ? 'on' : ''}`} onClick={() => setMode(mode === 'live' ? 'baseline' : 'live')}>
               <span className="dot" /> Real traffic (TomTom)
@@ -220,7 +286,7 @@ export default function App() {
           {mode === 'live' && data?.live && <LiveSummary live={data.live} sim={data.edgeStats} />}
           {sel?.micro && (
             <div className="seg small">
-              {['meso', 'micro'].map(k => <button key={k} className={sim === k ? 'on' : ''} onClick={() => setSimPref(k)}>{k}sim</button>)}
+              {['meso', 'micro'].map(k => <button key={k} className={sim === k ? 'on' : ''} onClick={() => setSimPref(k)}>{k === 'meso' ? data.screen : k}</button>)}
             </div>
           )}
           <p className="muted small">{sel || mode === 'live' ? viewLabel : 'Select a candidate road to compare before and after.'}</p>
@@ -228,6 +294,8 @@ export default function App() {
           <Legend {...legend} />
           {layers.candidates && <Legend {...SCORE_LEGEND} />}
         </section>
+        {data?.traffic && <TrafficPanel list={data.traffic} scene={() => sceneRef.current}
+          keyOf={run => data.selected.find(c => run === `c${String(c.meso?.cand ?? c.micro?.cand).padStart(2, '0')}`)?.key} />}
         <section>
           <details>
             <summary><h2>Scoring weights {custom && <span className="tag">custom</span>}</h2></summary>
@@ -255,7 +323,7 @@ export default function App() {
         </section>
       </aside>
 
-      {sel && <CandidateCard c={sel} sim={sim} rec={rec} base={data.baseline[sim]} w={w} rank={rankOf.get(selKey)?.rank}
+      {sel && <CandidateCard c={sel} res={resMode} sim={sim} screen={data.screen} rec={rec} base={data.baseline[sim === 'meso' ? data.screen : sim]} w={w} rank={rankOf.get(selKey)?.rank}
                              onClose={() => setSelKey(null)} />}
       {road && <RoadCard p={road} stats={statsRef.current} docked={!!sel} onClose={() => setRoad(null)} />}
       {hover && <Tooltip {...hover} byKey={rankOf} stats={statsRef.current} />}
@@ -308,19 +376,24 @@ function Legend({ title, stops, left, right }) {
   )
 }
 
-function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
+function CandidateCard({ c, res, sim, screen, rec, base, w, rank, onClose }) {
   const p = c.props
-  const s = scoreOf(rec, w)
-  const contrib = rec ? Object.keys(SIGN).map(k => [k, SIGN[k] * w[k] * rec[k]]) : []
+  // the 5-seed micro average outranks a single screening run: show it as the headline and break it down
+  const sr = res === 'micro' ? seedRec(c) : null, head = sr ?? rec
+  const otherSeed = res === 'macro' && seedRec(c)   // in macro view, still point to the validated result
+  const s = scoreOf(head, w), screenS = scoreOf(rec, w)
+  const contrib = head ? Object.keys(SIGN).map(k => [k, SIGN[k] * w[k] * head[k]]) : []
   const maxAbs = Math.max(1, ...contrib.map(([, v]) => Math.abs(v)))
   const microS = scoreOf(c.micro, w)
   return (
     <div className="card">
       <button className="close" onClick={onClose}>×</button>
-      <h2>{label(c)} <span className="muted">rank {rank ?? '—'} · {sim}sim</span></h2>
+      <h2>{label(c)} <span className="muted">rank {rank ?? '—'} · {sr ? `micro, ${seedRun(c).n} seeds` : sim === 'meso' ? screen : sim}</span></h2>
       {!rec ? <p className="muted">Not simulated yet.</p> : <>
-        <div className={`big ${s > 0 ? 'good' : 'bad'}`}>{signed(s, 2)} <span>score</span></div>
-        {sim === 'meso' && c.micro && (microS > 0) !== (s > 0) && (
+        <div className={`big ${s > 0 ? 'good' : 'bad'}`}>{signed(s, 2)} <span>score{sr ? ` ± ${fmt(seedRun(c).score_sd)}` : ''}</span></div>
+        {sr && <p className="muted small">Average of {seedRun(c).n} microsimulation runs. The fast {sim === 'meso' ? screen : sim} screen gave {signed(screenS, 2)}.</p>}
+        {otherSeed && <p className="muted small">Fast {screen} screen result. The {seedRun(c).n}-seed micro check gives {signed(scoreOf(otherSeed, w), 2)}: switch Results to Micro check.</p>}
+        {!sr && sim === 'meso' && c.micro && (microS > 0) !== (s > 0) && (
           <div className={`banner ${microS > 0 ? 'ok' : 'fail'}`}>
             {microS > 0 ? 'Confirmed' : 'Not confirmed'} by the detailed microsimulation: score {signed(microS, 2)},
             delay {c.micro.dT > 0 ? `${fmt(c.micro.dT)} % lower` : `${fmt(-c.micro.dT)} % higher`}
@@ -329,6 +402,7 @@ function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
         )}
         <p className="verdict">{seedRun(c) ? seedVerdict(c.noise) : verdict(best(c), scoreOf(best(c), w), !!c.micro)}</p>
         {c.noise.length > 0 && <SeedRuns runs={c.noise} />}
+        {sr && <h3>Single run ({sim === 'meso' ? screen : sim})</h3>}
         <table className="kv">
           <tbody>
             <tr><th>Mean delay per trip</th><td>{fmt(base?.mean_time_loss)} s → <b>{fmt(rec.mean_time_loss)} s</b></td></tr>
@@ -337,7 +411,7 @@ function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
             <tr><th>Teleports (stuck vehicles)</th><td>{fmt(base?.teleports, 0)} → {fmt(rec.teleports, 0)}</td></tr>
           </tbody>
         </table>
-        <h3>Score breakdown</h3>
+        <h3>Score breakdown{sr ? <span className="muted"> (5-seed average)</span> : ''}</h3>
         <div className="contrib">
           {contrib.map(([k, v]) => (
             <div key={k} className="row">
@@ -347,7 +421,7 @@ function CandidateCard({ c, sim, rec, base, w, rank, onClose }) {
             </div>
           ))}
         </div>
-        <p className="muted small">ΔT {signed(rec.dT)} % delay · ΔQ {signed(rec.dQ)} % queueing · ΔC {fmt(rec.dC)} % detour removed</p>
+        <p className="muted small">ΔT {signed(head.dT)} % delay · ΔQ {signed(head.dQ)} % queueing · ΔC {fmt(head.dC)} % detour removed</p>
       </>}
       <h3>Construction</h3>
       <table className="kv">
@@ -438,7 +512,24 @@ function Tooltip({ hit, x, y, byKey, stats }) {
   let body
   if (hit.kind === 'candidate') {
     const c = byKey.get(hit.key)
-    body = <><b>{c ? label(c) : 'Candidate'}</b><br />score {signed(c?.score, 2)} · {fmt(c?.props.length_m, 0)} m</>
+    if (!c) body = <b>Candidate (not simulated)</b>
+    else {
+      const r = c.rec, p = c.props, n = c.score == null ? null : seedRun(c)
+      const bridge = (p.road_crossings || 0) + (p.worksite_crossings || 0) > 0
+      const [tc, tt] = n ? seedTag(n) : c.score == null ? ['', 'macro only'] : [c.score > 0 ? 'ok' : 'fail', c.score > 0 ? 'improves' : 'worse']
+      body = <>
+        <div className="tt-head"><b>{label(c)}</b><em className={`tag ${tc}`}>{n ? `${n.n} seeds: ${tt}` : tt}</em></div>
+        <div className={`tt-score ${c.score > 0 ? 'good' : 'bad'}`}>{c.score == null ? '—' : signed(c.score, 2)} <span>{c.rank ? `score · rank ${c.rank}` : 'not checked in micro'}</span></div>
+        <table className="tt-kv"><tbody>
+          {r && <tr><th>Delay</th><td>{r.dT > 0 ? `${fmt(r.dT)} % lower` : `${fmt(-r.dT)} % higher`}</td></tr>}
+          {r && <tr><th>Queueing in box</th><td>{r.dQ > 0 ? `${fmt(r.dQ)} % lower` : `${fmt(-r.dQ)} % higher`}</td></tr>}
+          {n && <tr><th>Micro, {n.n} seeds</th><td>delay {signed(-n.dT)} % ± {fmt(n.dT_sd)}</td></tr>}
+          {r && <tr><th>Traffic on it</th><td>{fmt(r.cand_vph, 0)} veh/h</td></tr>}
+          <tr><th>Build</th><td>{fmt(p.length_m, 0)} m · {bridge ? 'bridge' : 'at ground level'}{p.worksite_crossings ? ` · crosses metro ×${p.worksite_crossings}` : ''}{p.buildings_hit ? ` · ${p.buildings_hit} bldg` : ''}</td></tr>
+        </tbody></table>
+        <div className="tt-hint">Click for details</div>
+      </>
+    }
   } else {
     const p = hit.props
     let line = 'no traffic'
@@ -449,5 +540,5 @@ function Tooltip({ hit, x, y, byKey, stats }) {
     }
     body = <><b>{p.name || 'Unnamed road'}</b><br />{line}</>
   }
-  return <div className="tooltip" style={{ left: x + 14, top: y + 14 }}>{body}</div>
+  return <div className={`tooltip ${hit.kind === 'candidate' ? 'cand' : ''}`} style={{ left: x + 14, top: y + 14 }}>{body}</div>
 }

@@ -28,7 +28,7 @@ export async function loadAll() {
   const bbox = areas[AREA]?.bbox || BBOXES[AREA]
   if (!bbox) throw new Error(`area "${AREA}" has not been exported yet`)
   const empty = { type: 'FeatureCollection', features: [] }
-  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios, live, noise] = await Promise.all([
+  const [roads, buildings, zones, construction, candidates, edgeStats, scenarios, live, noise, parallel, traffic] = await Promise.all([
     getJSON('roads.geojson'),
     getJSON('buildings.geojson'),
     // zones = obstacles + kind (water/park/institutional); older exports only have obstacles.geojson
@@ -41,12 +41,18 @@ export async function loadAll() {
     optional(getJSON('live_traffic.json'), null),
     // repeated runs over several SUMO seeds (urban.noise), per candidate variant (1 lane 40 km/h, 2 lanes 60 km/h, ...)
     optional(getJSON('noise.json'), {}),
+    // Phase 5 benchmark (urban.parallel): one row per worker count
+    optional(getJSON('parallel.json'), null),
+    // vehicle trajectories for the animation (urban.fcd): the list only; runs load on demand
+    optional(getJSON('traffic.json'), null),
   ])
 
   // Join scenario results to candidate geometry through (u, v), as the contract prefers.
   // screening results: macro (deterministic marouter assignment) when exported, else the older meso screen.
-  // TODO: UI labels still say "meso"; per-scenario heatmap stats for macro runs are not exported yet.
-  const meso = new Map((scenarios.macro || scenarios.meso || []).map(r => [candKey(r.u, r.v), r]))
+  // Internally the screening result stays under the key "meso"; `screen` says which model produced it, for labels
+  // and for the per-road stats file names (scenario_stats/base_<screen>.json).
+  const screen = scenarios.macro ? 'macro' : 'meso'
+  const meso = new Map((scenarios[screen] || []).map(r => [candKey(r.u, r.v), r]))
   const micro = new Map((scenarios.micro || []).map(r => [candKey(r.u, r.v), r]))
   // ranking happens in App.jsx, because it depends on the user's scoring weights
 
@@ -64,7 +70,7 @@ export async function loadAll() {
     })
   const others = candidates.features.filter(f => f.properties.status !== 'selected')
 
-  return { areas, bbox, roads, buildings, zones, construction, edgeStats, selected, others, live, noise,
+  return { areas, bbox, roads, buildings, zones, construction, edgeStats, selected, others, live, noise, parallel, screen, traffic,
            baseline: scenarios.baseline || {}, hasMicro: micro.size > 0, hasSim: Object.keys(edgeStats).length > 0 }
 }
 

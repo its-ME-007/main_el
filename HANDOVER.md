@@ -1,5 +1,8 @@
 # Handover: state of the Hebbal pipeline (2026-11-23)
 
+> **2026-11-24 update (Anushruth): see [CHANGES_2026-11-24.md](CHANGES_2026-11-24.md)**: Mac reproduction, Phase 5
+> benchmark, macro/micro results in the UI, 3D bridges, vehicle animation, GLSL shaders.
+
 From Anushruth's session, for whoever picks this up next (human or Claude Code: start with "read HANDOVER.md and
 continue"). Branch `feat/viz`, PR #1. Project notes in `.claude/CLAUDE.md` are updated too.
 

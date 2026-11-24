@@ -71,6 +71,21 @@ def edge_stats(path):
     return out
 
 
+def macro_edge_stats(path):
+    """Same schema as edge_stats() from marouter's netload.xml. Delay per edge = flow x travel time x (1 - speed/limit),
+    as in sim.assign(); a static assignment has no waiting time, and occupancy is reported as v/c (flowCapacityRatio)."""
+    out = {}
+    for el in ET.parse(path).getroot().iter("edge"):
+        q = float(el.get("entered", 0))
+        if el.get("id").startswith(":") or q <= 0:
+            continue
+        rel, tt = float(el.get("speedRelative", 1)), float(el.get("traveltime", 0))
+        out[el.get("id")] = {"speed": round(float(el.get("speed", 0)), 3), "speed_rel": round(rel, 3),
+                             "time_loss": round(q * tt * (1 - rel), 3), "entered": round(q, 3), "waiting": 0.0,
+                             "occupancy": round(float(el.get("flowCapacityRatio", 0)), 3)}
+    return out
+
+
 def dump(obj, path):
     path.write_text(json.dumps(obj, separators=(",", ":")))
     print(f"  {path.relative_to(DATA)}  {path.stat().st_size / 1e6:.1f} MB")
@@ -84,6 +99,9 @@ def export(area="hebbal"):
     if (d / "sim" / "baseline" / "edges.xml").exists():
         dump(edge_stats(d / "sim" / "baseline" / "edges.xml"), d / "edge_stats.json")
 
+    # independent of the candidate results, so exported even before urban.evaluate has run
+    if (d / "parallel.csv").exists():   # urban.parallel: speedup/efficiency per worker count (Phase 5)
+        dump(pd.read_csv(d / "parallel.csv").round(4).to_dict(orient="records"), d / "parallel.json")
     sd = d / "scenario_stats"
     sd.mkdir(exist_ok=True)
     names = {"macro": ["scenarios_macro.csv"], "meso": ["scenarios_meso.csv", "scenarios.csv"],  # scenarios.csv: old
@@ -97,6 +115,9 @@ def export(area="hebbal"):
         if not any(run.parent.glob("metrics_*.json")):  # still running: edges.xml is half-written
             continue
         dump(edge_stats(run), sd / f"{run.parent.name}.json")
+    for run in sorted((d / "sim" / "scenarios").glob("*_macro/netload.xml")):   # macro: marouter netload, no edges.xml
+        if any(run.parent.glob("metrics_*.json")):
+            dump(macro_edge_stats(run), sd / f"{run.parent.name}.json")
 
     res = {}
     for key, f in found.items():

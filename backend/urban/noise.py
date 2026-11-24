@@ -78,6 +78,10 @@ def summary(df):
         sm, ssd, *_ = spread(list(g.score))
         out["cands"][int(run[1:])] = {"n": len(g), "dT": dm, "dT_sd": dsd, "dT_min": dlo, "dT_max": dhi,
                                       "score": sm, "score_sd": ssd, "cand_vph": float(g.cand_vph.mean()),
+                                      # all score terms (dQ averaged; dC, L, P are fixed per candidate), so the UI
+                                      # can re-score the seed average with the user's weights
+                                      "dQ": float(g.dQ.mean()), "dQ_sd": spread(list(g.dQ))[1],
+                                      "dC": float(g.dC.iloc[0]), "L": float(g.L.iloc[0]), "P": float(g.P.iloc[0]),
                                       "verdict": verdict(list(g.dT))}
     return out
 

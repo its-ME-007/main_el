@@ -144,11 +144,11 @@ def make_demand(net, area, seed=SEED):
 MESO = ["--mesosim", "--meso-junction-control", "true"]  # queue-based edges; junction-control keeps TLS effects
 
 
-def run(net, routes, out, seed=SEED, meso=False, extra_add="", extra_args=()):
+def run(net, routes, out, seed=SEED, meso=False, extra_add="", extra_args=(), end=None):
     """Run SUMO headless; return (summary metrics, per-edge stats).
     meso=True: mesoscopic model, much faster, for candidate screening (validate top picks with microsim).
     extra_add: XML put into the additional file, e.g. a vType with id DEFAULT_VEHTYPE (urban.isolate).
-    extra_args: more sumo options (urban.isolate)."""
+    extra_args: more sumo options (urban.isolate). end: stop time (default DURATION * 2; urban.fcd stops early)."""
     out.mkdir(parents=True, exist_ok=True)
     add = out / "edgedata.add.xml"
     add.write_text(f'<additional>{extra_add}<edgeData id="e" file="{(out / "edges.xml").as_posix()}"/></additional>')
@@ -157,7 +157,7 @@ def run(net, routes, out, seed=SEED, meso=False, extra_add="", extra_args=()):
         "--tripinfo-output", str(out / "tripinfo.xml"), "--statistic-output", str(out / "stats.xml"),
         "--seed", str(seed), "--ignore-route-errors",
         "--device.rerouting.probability", "1" if REROUTE else "0", "--device.rerouting.period", "60",  # adapt to congestion
-        "--time-to-teleport", "300", "--end", str(DURATION * 2),
+        "--time-to-teleport", "300", "--end", str(end or DURATION * 2),
         "--ignore-junction-blocker", "20",   # user 2026-11-24: breaks the local-road gridlock ring (urban.isolate)
         "--no-step-log", "--no-warnings", "--duration-log.statistics", "false",
         *(MESO if meso else []), *extra_args,
