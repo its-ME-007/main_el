@@ -56,3 +56,24 @@ CAND_LANES=2 CAND_KMH=60 uv run python -m urban.noise hebbal --cands 24,25 --wor
 uv run python -m urban.export hebbal                             # then: cd ../frontend && npm run dev
 ```
 8 GB machine: keep `--workers 2` and run one SUMO job at a time.
+
+## Next: a second area (RR Nagar) — teammate task (2026-11-24)
+The code now runs on any area inside the offline city cut (`CITY_BBOX` in `urban/data.py`, 77.45-77.80 E,
+12.80-13.20 N; RR Nagar is inside). Done: `ZIPPER_NODES` ids missing from an area are skipped, and an area without
+the Hebbal flyover gets one uncalibrated through rate (`OTHER_RATE` over all arterial pairs). Tested on Koramangala.
+
+To do (in this order, one SUMO job at a time):
+1. Pick a ~1.6 x 1.6 km box (Hebbal is 0.016 deg lon x 0.014 deg lat), e.g. centred on the RR Nagar Arch /
+   Mysore Road junction, and add it to `AREAS` in `backend/urban/data.py` as `"rrnagar": (west, south, east, north)`.
+2. `uv run python -m urban.data rrnagar`, then `uv run python -m urban.sim rrnagar` (baseline).
+3. Find a published peak-hour count for one main road (Mysore Road / Arch Road / Ideal Homes Rd). Without one,
+   demand is a guess and results are relative only: say so in the report. Calibration is currently Hebbal-only
+   (`FLYOVER_TARGET_VPH`, `is_flyover_main`, `FLYOVER_RATE`); a count needs the same pattern for that road.
+4. Stalls: check the baseline's top bottlenecks (printed by `urban.sim`). Anything below ~10 % of its limit is
+   likely a junction problem (merge that never gets a gap, all-minor gridlock ring, signal). Test fixes with
+   `uv run python -m urban.isolate rrnagar --variants ref,zipper,...` (set `ZIPPER_NODE` in isolate.py first) and
+   add confirmed merges to `ZIPPER_NODES` in sim.py.
+5. `urban.candidates rrnagar` -> `urban.evaluate rrnagar --workers 2` (macro screen) ->
+   `urban.noise rrnagar --cands <macro top 10> --workers 2` (micro, 5 seeds; rank on THIS, not on macro) ->
+   `urban.export rrnagar`; the UI opens it with `?area=rrnagar` (add a display name to `AREA_NAMES` in
+   `frontend/src/data.js`).

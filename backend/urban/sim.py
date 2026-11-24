@@ -59,7 +59,8 @@ def untagged_speeds(raw, net):
     edg.write_text("<edges>\n" + "\n".join(edges) + "\n</edges>\n")
     nod = net.parent / "zipper.nod.xml"   # same pass: ZIPPER_NODES become zipper merges
     nod.write_text("<nodes>" + "".join(f'<node id="{n}" x="{nw.getNode(n).getCoord()[0]}" '
-                                       f'y="{nw.getNode(n).getCoord()[1]}" type="zipper"/>' for n in ZIPPER_NODES)
+                                       f'y="{nw.getNode(n).getCoord()[1]}" type="zipper"/>'
+                                       for n in ZIPPER_NODES if nw.hasNode(n))   # ids are per area
                    + "</nodes>")
     subprocess.run([sumolib.checkBinary("netconvert"), "--sumo-net-file", str(raw), "--edge-files", str(edg),
                     "--node-files", str(nod), "-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
@@ -115,8 +116,10 @@ def make_demand(net, area, seed=SEED):
             if path:
                 uses = any(is_flyover_main(nw, e, AREAS[area]) for e in path)
                 (fly if uses else other).append((a, b))
-    assert fly and other, "no routable arterial entry->exit pairs"
-    rated = [(p, FLYOVER_RATE / len(fly)) for p in fly] + [(p, OTHER_RATE / len(other)) for p in other]
+    assert fly or other, "no routable arterial entry->exit pairs"
+    if not fly:   # area without the surveyed flyover: one uncalibrated through rate (OTHER_RATE) over all pairs
+        print("  no calibration road in this area: through demand uncalibrated")
+    rated = ([(p, FLYOVER_RATE / len(fly)) for p in fly] if fly else []) + [(p, OTHER_RATE / len(other)) for p in other]
     flows = "".join(f'<flow id="through{i}" from="{a.getID()}" to="{b.getID()}" begin="0" end="{DURATION}" '
                     f'vehsPerHour="{vph:.2f}" departLane="best" departSpeed="max"/>'
                     for i, ((a, b), vph) in enumerate(rated))
@@ -133,8 +136,8 @@ def make_demand(net, area, seed=SEED):
         "-b", "0", "-e", str(DURATION), "--insertion-rate", str(LOCAL_RATE), "--seed", str(seed),
         "--weights-prefix", str(d / "w"), "--min-distance", "300", "--validate", "--prefix", "local",
     ], check=True, stdout=subprocess.DEVNULL)
-    print(f"demand: {len(fly)} flyover pairs @ {FLYOVER_RATE / len(fly):.0f} veh/h, "
-          f"{len(other)} other pairs @ {OTHER_RATE / len(other):.0f} veh/h, local {LOCAL_RATE} veh/h")
+    print(f"demand: {len(fly)} flyover pairs @ {FLYOVER_RATE / max(1, len(fly)):.0f} veh/h, "
+          f"{len(other)} other pairs @ {OTHER_RATE / max(1, len(other)):.0f} veh/h, local {LOCAL_RATE} veh/h")
     return [d / "through.rou.xml", local]
 
 
