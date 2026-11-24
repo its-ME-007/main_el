@@ -3,6 +3,7 @@ import { CityScene } from './scene.js'
 import { AREA, areaName, loadAll, loadComparison } from './data.js'
 import ResultsChart from './ResultsChart.jsx'
 import ParallelChart from './ParallelChart.jsx'
+import RunPanel from './RunPanel.jsx'
 import TrafficPanel from './TrafficPanel.jsx'
 import { CHANGE_LEGEND, NO_TRAFFIC, SCORE_LEGEND, SPEED_LEGEND, changeColor, cssGradient, scoreColor, speedColor } from './colors.js'
 
@@ -104,7 +105,7 @@ export default function App() {
       if (hit) setSelKey(hit.key)
       if (['after', 'change'].includes(q.get('view')) || (q.get('view') === 'live' && d.live)) setMode(q.get('view'))
       if (q.get('sim') === 'micro') setSimPref('micro')
-      if (['chart', 'parallel'].includes(q.get('tab'))) setTab(q.get('tab'))
+      if (['chart', 'parallel', 'run'].includes(q.get('tab'))) setTab(q.get('tab'))
     }).catch(e => setError(String(e.message || e)))
     return () => s.dispose()
   }, [])
@@ -223,8 +224,10 @@ export default function App() {
             <button className={tab === 'ranking' ? 'on' : ''} onClick={() => setTab('ranking')}>Ranking</button>
             <button className={tab === 'chart' ? 'on' : ''} onClick={() => setTab('chart')}>Chart</button>
             <button className={tab === 'parallel' ? 'on' : ''} onClick={() => setTab('parallel')}>Parallel</button>
+            <button className={tab === 'run' ? 'on' : ''} onClick={() => setTab('run')}>Run</button>
           </div>
           {tab === 'parallel' && <ParallelChart rows={data.parallel} />}
+          {tab === 'run' && <RunPanel />}
           {tab === 'chart' && <ResultsChart rows={chartRows} selKey={selKey} onSelect={select} onHover={hoverCand} />}
           {tab === 'ranking' && <>
             <p className="muted small rank-note">{resMode === 'micro'

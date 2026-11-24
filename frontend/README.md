@@ -52,3 +52,12 @@ Deep links for demos: `/?cand=22&view=change&sim=micro`, `/?tab=chart`, `/?view=
 | `src/TrafficPanel.jsx` | animation controls |
 
 Graphics upgrade ideas for the CGVR component: [CGVR_ROADMAP.md](CGVR_ROADMAP.md).
+
+## One app (Phase 7)
+```
+cd frontend && npm run build
+cd ../backend && uv run uvicorn urban.api:app --port 8000     # http://localhost:8000
+```
+or `docker compose up --build` from the repo root. The **Run** tab starts pipeline steps (one at a time) and shows
+their logs; run `export` afterwards and reload to see new results. In development (`npm run dev`) Vite proxies
+`/api` to the server on port 8000.

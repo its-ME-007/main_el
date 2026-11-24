@@ -240,3 +240,16 @@ details[open] > summary h2::before { transform: rotate(90deg); }
 .blend { display: block; margin: 10px 0 4px; }
 .blend .row { display: flex; justify-content: space-between; }
 .blend input[type=range] { width: 100%; }
+
+/* Run tab (Phase 7 job runner) */
+.run label { display: block; margin: 8px 0 4px; font-weight: 600; }
+.run select, .run input { display: block; width: 100%; margin-top: 4px; background: var(--panel, #11161f); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; box-sizing: border-box; }
+.run-buttons { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+.run-buttons button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font: inherit;
+  font-weight: 600; cursor: pointer; }
+.run-buttons button:disabled { opacity: 0.4; cursor: default; }
+.run details { margin-top: 8px; }
+.run summary { cursor: pointer; font-size: 12px; }
+.run-log { max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all;
+  background: rgba(0, 0, 0, 0.25); padding: 8px; border-radius: 8px; color: var(--muted); }

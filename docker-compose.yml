@@ -1,0 +1,9 @@
+# docker compose up --build   ->   http://localhost:8000
+services:
+  app:
+    build: .
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend/data:/app/backend/data   # OSM extract, networks, runs and exports live on the host
+    environment:
+      - TOMTOM_API_KEY                     # optional, passed through from the host for the live step

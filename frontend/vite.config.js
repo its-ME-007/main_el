@@ -25,4 +25,5 @@ function backendData() {
   }
 }
 
-export default defineConfig({ plugins: [react(), backendData()] })
+// /api goes to the FastAPI server (backend/urban/api.py): `uv run uvicorn urban.api:app --port 8000`
+export default defineConfig({ plugins: [react(), backendData()], server: { proxy: { '/api': 'http://localhost:8000' } } })
