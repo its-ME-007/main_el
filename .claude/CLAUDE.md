@@ -209,6 +209,10 @@ and shows everything in an interactive 3D interface.
   shells opened before install may not see it or PATH). `traci` + `sumolib` in backend deps.
 
 ## Deferred ideas (pick up only if needed)
+- Tunnel feeders (user, 2026-11-25): next candidate type after surface roads = TUNNELS used as feeders, i.e. a
+  tunnel from a busy road into a flyover connection. Grade-separated, so no building/road/metro crossing penalty in
+  the same way; uncontrollable variables (geology, utilities, exact portal sites) stay out of scope, so results are
+  proposals only. Not started.
 - Live traffic speeds for calibration/validation (user: "we'll look at this if needed", 2026-11-21).
   OSM has NO traffic data (static map only). Live speeds come from commercial APIs: TomTom Traffic Flow
   (free tier, easiest), HERE Traffic (free tier), Google Routes (paid, storage restricted), Mapbox.
@@ -260,5 +264,11 @@ Append dated decisions here (locality chosen, sim model, repo layout, etc.).
 - 2026-11-20: Backend = uv project in `backend/`, Python 3.12, package `urban/`.
 - 2026-11-20: Primary study area = Hebbal (flyover junction + metro interchange under construction), bbox
   (77.5890, 13.0290, 77.6050, 13.0430). Chosen by user for a real planning context. Koramangala kept as dev/test area.
+- 2026-11-25: Second area = Baiyappanahalli - Benniganahalli (replaces RR Nagar), bbox (77.6500, 12.9850, 77.6720,
+  13.0030), data fetched. Plan in HANDOVER.md.
+- 2026-11-25: In-service at-grade rail = hard reject for candidates (`rejected:rail`), except crossings on vacant land
+  (brownfield/greenfield/grass/scrub), priced 30 P = 7.5 points. data.py writes rail.geojson + vacant.geojson.
+  Hebbal NOT regenerated: 31/40 of its selected candidates cross the main line (alongside the Mallige works), incl.
+  macro c17/c16/c15/c11/c22, but not the micro winner c39 or c27, so the Hebbal conclusion stands.
 - 2026-11-20: Dev/test locality = Koramangala bbox (77.6150, 12.9250, 77.6300, 12.9400), drive network,
   trimmed to the largest strongly connected component (441 nodes, 1101 edges, 4084 buildings, 30 obstacles).

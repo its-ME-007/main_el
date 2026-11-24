@@ -81,6 +81,10 @@ def generate(area="hebbal", baseline="baseline"):
     cons = gpd.read_file(d / "construction.geojson")
     corridors = [shapely.transform(shapely.union_all(list(g.geometry)), to_xy)
                  for _, g in cons.groupby(cons["name"].fillna(""))] if len(cons) else []
+    # in-service rail at grade: crossing is rejected unless the crossing point lies on vacant land (data.py)
+    # (areas fetched before 2026-11-25 lack these files: rerun urban.data; until then no rail rule)
+    rail, vacant = (shapely.union_all(layer(f)) if (d / f).exists() else shapely.GeometryCollection()
+                    for f in ("rail.geojson", "vacant.geojson"))
     road_edges = [e for e in nw.getEdges()]
     roads = STRtree([LineString(e.getShape()) for e in road_edges])
 
@@ -111,9 +115,12 @@ def generate(area="hebbal", baseline="baseline"):
             # Opposite directions (id / -id) of one road count once.
             crossed = {road_edges[i].getID().lstrip("-").split("#")[0]
                        for i in roads.query(core, predicate="intersects") if road_edges[i].getID() not in touching}
+            x_rail = core.intersection(rail)
             flags = {"road_crossings": len(crossed),
-                     "worksite_crossings": worksite_crossings(core, corridors)}
-            failed = (["building"] if hit > MAX_DEMOLISH else []) + (["obstacle"] if obstacle else [])
+                     "worksite_crossings": worksite_crossings(core, corridors),
+                     "rail_crossings": worksite_crossings(core, [rail]) if not x_rail.is_empty else 0}
+            failed = (["building"] if hit > MAX_DEMOLISH else []) + (["obstacle"] if obstacle else []) \
+                + (["rail"] if not x_rail.is_empty and not x_rail.within(vacant) else [])
             status = f"rejected:{failed[0]}" if failed else "feasible"
             rows.append({"u": su, "v": vid, "length_m": round(straight, 1), "net_dist": round(net_dist, 1),
                          "detour": round(net_dist / straight, 2), "seed_loss": round(node_loss[su]), "buildings_hit": hit,

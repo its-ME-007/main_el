@@ -39,7 +39,9 @@ WEIGHTS = {"dT": 1.0, "dQ": 0.5, "dC": 0.01, "L": 0.002, "P": 0.25}
 # P cost units: a demolished building = 1, a grade-separated road crossing = 0.5, a metro worksite crossing = 22
 # (user, 2026-11-24: crossing the metro works is heavily penalised, 22 x WEIGHTS["P"] = 5.5 score points each,
 # so a crossing candidate only wins on a large gain; at 1 it cost 0.25 points, nothing next to dT/dQ of 1-8)
-P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 22.0}
+# In-service rail (user, 2026-11-25): crossings are rejected in candidates.py unless over vacant land; those that
+# remain cost 30 = 7.5 points each, more than the metro works.
+P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 22.0, "rail_crossings": 30.0}
 
 
 def scenario_net(base, cand, incoming, out):
@@ -87,7 +89,7 @@ def score(c, m, b):
          "dQ": 100 * (b["box_waiting"] - m["box_waiting"]) / b["box_waiting"],
          "dC": 100 * (1 - c.length_m / c.net_dist),
          "L": c.length_m,
-         "P": sum(w * c[k] for k, w in P_COST.items())}
+         "P": sum(w * c.get(k, 0) for k, w in P_COST.items())}   # older candidate files lack rail_crossings
     d["score"] = sum(s * WEIGHTS[k] * d[k] for k, s in (("dT", 1), ("dQ", 1), ("dC", 1), ("L", -1), ("P", -1)))
     return d
 

@@ -60,23 +60,34 @@ uv run python -m urban.export hebbal                             # then: cd ../f
 ```
 8 GB machine: keep `--workers 2` and run one SUMO job at a time.
 
-## Next: a second area (RR Nagar) — teammate task (2026-11-24)
-The code now runs on any area inside the offline city cut (`CITY_BBOX` in `urban/data.py`, 77.45-77.80 E,
-12.80-13.20 N; RR Nagar is inside). Done: `ZIPPER_NODES` ids missing from an area are skipped, and an area without
-the Hebbal flyover gets one uncalibrated through rate (`OTHER_RATE` over all arterial pairs). Tested on Koramangala.
+## Next: a second area (Baiyappanahalli - Benniganahalli) — teammate task (2026-11-25)
+Area changed from RR Nagar (user, 2026-11-25): Hebbal's problem is a flyover junction; this one is a network cut by
+rail lines and yards, with heavy congestion (Tin Factory / ORR junction) and a real access question (SMVT terminal,
+Baiyappanahalli metro). The code runs on any area inside the offline city cut (`CITY_BBOX` in `urban/data.py`).
+`ZIPPER_NODES` ids missing from an area are skipped, and an area without the Hebbal flyover gets one uncalibrated
+through rate (`OTHER_RATE` over all arterial pairs). Tested on Koramangala.
+
+Done: box `"baiyappanahalli": (77.6500, 12.9850, 77.6720, 13.0030)` in `AREAS` (~2.4 x 2.0 km, from Baiyappanahalli
+metro 77.6524,12.9907 to Benniganahalli metro / Tin Factory 77.6685,12.9965, incl. the whole Benniganahalli Flyover);
+`urban.data baiyappanahalli` ran: 4,323 nodes, 10,525 edges, 149 arterial (Swamy Vivekananda Rd = Old Madras Rd
+here, ORR NH44/48/75, Benniganahalli Flyover), 5,109 buildings, 40 obstacles. construction.geojson = Metro Phase 2A
+(ORR Blue Line) + Mallige / Kanaka suburban rail, so the worksite crossing rule applies as-is.
 
 To do (in this order, one SUMO job at a time):
-1. Pick a ~1.6 x 1.6 km box (Hebbal is 0.016 deg lon x 0.014 deg lat), e.g. centred on the RR Nagar Arch /
-   Mysore Road junction, and add it to `AREAS` in `backend/urban/data.py` as `"rrnagar": (west, south, east, north)`.
-2. `uv run python -m urban.data rrnagar`, then `uv run python -m urban.sim rrnagar` (baseline).
-3. Find a published peak-hour count for one main road (Mysore Road / Arch Road / Ideal Homes Rd). Without one,
-   demand is a guess and results are relative only: say so in the report. Calibration is currently Hebbal-only
-   (`FLYOVER_TARGET_VPH`, `is_flyover_main`, `FLYOVER_RATE`); a count needs the same pattern for that road.
+1. DONE (2026-11-25, user): in-service rail at grade (`railway=rail|narrow_gauge`, not bridge/tunnel) is a hard
+   reject (`rejected:rail`) unless the crossing lies on vacant land (`vacant.geojson`: brownfield, greenfield, grass,
+   natural=scrub); those cost `rail_crossings` x 30 = 7.5 points (metro works 5.5). Elevated/underground metro is
+   not a barrier. Here 43 at-grade ways, 26.9 km, and only ~5 m of it on vacant land: every crossing is rejected.
+2. `uv run python -m urban.sim baiyappanahalli` (baseline). The box is ~1.9x Hebbal's area: expect a slower run.
+3. Find a published peak-hour count for one main road (Old Madras Rd / ORR at Tin Factory / Benniganahalli Flyover).
+   Without one, demand is a guess and results are relative only: say so in the report. Calibration is currently
+   Hebbal-only (`FLYOVER_TARGET_VPH`, `is_flyover_main`, `FLYOVER_RATE`); a count needs the same pattern for that
+   road. TomTom speeds (`urban.live`) are the fallback check.
 4. Stalls: check the baseline's top bottlenecks (printed by `urban.sim`). Anything below ~10 % of its limit is
    likely a junction problem (merge that never gets a gap, all-minor gridlock ring, signal). Test fixes with
-   `uv run python -m urban.isolate rrnagar --variants ref,zipper,...` (set `ZIPPER_NODE` in isolate.py first) and
-   add confirmed merges to `ZIPPER_NODES` in sim.py.
-5. `urban.candidates rrnagar` -> `urban.evaluate rrnagar --workers 2` (macro screen) ->
-   `urban.noise rrnagar --cands <macro top 10> --workers 2` (micro, 5 seeds; rank on THIS, not on macro) ->
-   `urban.export rrnagar`; the UI opens it with `?area=rrnagar` (add a display name to `AREA_NAMES` in
-   `frontend/src/data.js`).
+   `uv run python -m urban.isolate baiyappanahalli --variants ref,zipper,...` (set `ZIPPER_NODE` in isolate.py
+   first) and add confirmed merges to `ZIPPER_NODES` in sim.py.
+5. `urban.candidates baiyappanahalli` -> `urban.evaluate baiyappanahalli --workers 2` (macro screen) ->
+   `urban.noise baiyappanahalli --cands <macro top 10> --workers 2` (micro, 5 seeds; rank on THIS, not on macro) ->
+   `urban.export baiyappanahalli`; the UI opens it with `?area=baiyappanahalli` (add a display name to `AREA_NAMES`
+   in `frontend/src/data.js`).

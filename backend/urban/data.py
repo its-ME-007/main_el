@@ -24,6 +24,10 @@ CITY_BBOX = (77.45, 12.80, 77.80, 13.20)
 AREAS = {
     "koramangala": (77.6150, 12.9250, 77.6300, 12.9400),  # dense grid, dev/test area
     "hebbal": (77.5890, 13.0290, 77.6050, 13.0430),       # flyover + metro interchange works
+    # Old Madras Rd from Baiyappanahalli metro to Benniganahalli metro / Tin Factory (ORR junction); rail lines and
+    # yards cut the network. ~2.4 km x 2.0 km, bigger than the others to keep both stations, the junction and the
+    # Benniganahalli Flyover.
+    "baiyappanahalli": (77.6500, 12.9850, 77.6720, 13.0030),
 }
 
 ROAD_PAD = 0.01  # degrees (~1.1 km) of road network kept around each area
@@ -104,6 +108,26 @@ def fetch(area="hebbal"):
         rail = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
     cols = [c for c in ("name", "construction") if c in rail]
     rail[["geometry", *cols]].to_file(out / "construction.geojson", driver="GeoJSON")
+
+    # In-service rail at grade (user, 2026-11-25): a candidate may not cross it, except over vacant land that could be
+    # repurposed. Track on a bridge/in a tunnel is skipped (a road passes it already); the metro (subway/light_rail)
+    # runs elevated or underground here, so it is not a barrier either.
+    def lines(tags, keep=lambda f: True):
+        try:
+            f = ox.features_from_xml(out / "features.osm", polygon=poly, tags=tags)
+        except ox._errors.InsufficientResponseError:
+            return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        return f[keep(f)]
+    def at_grade(f):
+        m = f.geom_type.isin(["LineString", "MultiLineString"])
+        for k in ("bridge", "tunnel"):
+            if k in f:
+                m &= f[k].fillna("no") == "no"
+        return m
+    lines({"railway": ["rail", "narrow_gauge"]}, at_grade)[["geometry"]].to_file(out / "rail.geojson", driver="GeoJSON")
+    # vacant = unbuilt land OSM marks as unused (no brownfield/greenfield tags at Baiyappanahalli; scrub is ~17 ha)
+    lines({"landuse": ["brownfield", "greenfield", "grass"], "natural": ["scrub"]},lambda f: f.geom_type.isin(["Polygon", "MultiPolygon"]))[
+        ["geometry"]].to_file(out / "vacant.geojson", driver="GeoJSON")
     return g
 
 
