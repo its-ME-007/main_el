@@ -98,6 +98,11 @@ and shows everything in an interactive 3D interface.
   incoming edge ids, not the net). `urban/parallel.py` benchmark (DURATION=900 meso, N=16, P=1,2,4,8, fresh
   `sim/bench/p{P}/`, checks results identical to sequential) -> `parallel.csv`. Not yet run. Machine: 16 cores /
   24 threads, 15.7 GB RAM. Never run two sims at once: `make_demand` rewrites the shared route files in `sim/`.
+  - BENCHMARK DONE (2026-11-24, `parallel.csv`, macro, baseline + 16 candidates = 17 scenarios, user's own terminal):
+    P=1 1,430 s wall (84 s/run), P=2 715 s (speedup 2.00, efficiency 1.00), P=4 395 s (speedup 3.62, efficiency 0.90,
+    utilization 0.93), results identical to sequential at every P. P=4 loss = 17 jobs on 4 workers (last wave
+    part-empty) + slight per-run slowdown (84 -> 86 s). `parallel.py` resumes: finished rounds keep round.json +
+    compare.csv in sim/bench/p<P>/.
   - NOISE FLOOR (2026-11-23, `evaluate.py --noise 6 --workers 2`, `noise_meso.csv`): meso baseline, same demand,
     SUMO seeds 42-47. Mean time loss 141.4 / 151.5 / 144.7 / 155.3 / 158.2 / 171.3 s: std 7.6 % in dT, 19.4 % in
     dQ. Seed 42 (the baseline every candidate was compared to) is the LUCKIEST draw, about 8 % below the seed mean,
