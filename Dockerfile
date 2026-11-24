@@ -11,9 +11,14 @@ RUN npm run build
 
 # 2. backend + SUMO. The eclipse-sumo wheel ships sumo, netconvert, marouter and tools/ (randomTrips.py).
 FROM python:3.12.8-slim
+# libexpat1 (pyosmium, netconvert), libatomic1, and the X11/GL libs the eclipse-sumo binaries link against even
+# when run headless; slim images leave them all out
+RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 libatomic1 libx11-6 libxext6 libxrender1 libgl1 && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /bin/uv
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock ./
+# big wheels (eclipse-sumo ~100 MB, geopandas stack) time out at uv's default 30 s on slow links
+ENV UV_HTTP_TIMEOUT=300
 RUN uv sync --frozen --no-dev && uv pip install eclipse-sumo==1.28.0
 COPY backend/urban ./urban
 COPY --from=ui /app/frontend/dist /app/frontend/dist

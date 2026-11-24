@@ -233,7 +233,8 @@ if __name__ == "__main__":
     t2 = time.perf_counter(); metrics, edges = run(net, routes, net.parent / ("baseline_meso" if meso else "baseline"), meso=meso)
     t3 = time.perf_counter()
     assert metrics["arrived"] > 0 and edges, "simulation produced no traffic"
-    through = (FLYOVER_RATE + OTHER_RATE) * DURATION / 3600
+    # through vehicles actually written (areas without the flyover have no FLYOVER_RATE share)
+    through = sum(float(f.vehsPerHour) for f in sumolib.xml.parse(str(routes[0]), "flow")) * DURATION / 3600
     assert metrics["loaded"] > through * 1.1, "local trips missing: check randomTrips weights"
     for k, v in metrics.items():
         print(f"{k:>18}: {v:,.1f}")

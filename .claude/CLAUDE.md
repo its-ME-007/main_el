@@ -188,8 +188,10 @@ and shows everything in an interactive 3D interface.
   steps share route files; args restricted to [\w.,=-]; stop via `/api/jobs/<id>/stop`; logs in data/jobs/).
   UI "Run" tab (`RunPanel.jsx`); Vite proxies /api to :8000. Run: `cd backend; uv run uvicorn urban.api:app
   --port 8000` (after `npm run build`) or `docker compose up --build` (Dockerfile: node build + python 3.12 + uv +
-  eclipse-sumo 1.28 wheel; backend/data mounted as a volume). Tested locally (UI, data, jobs, export job); Docker
-  image NOT yet built here (Docker Desktop was not running).
+  eclipse-sumo 1.28 wheel; backend/data mounted as a volume). Docker TESTED 2026-11-24: image 1.3 GB; UI, data
+  volume and an export job via the API work; netconvert + randomTrips + sumo ran a Koramangala baseline inside the
+  container. Slim base needs apt libexpat1 libatomic1 libx11-6 libxext6 libxrender1 libgl1 (SUMO binaries link
+  X11/GL even headless); UV_HTTP_TIMEOUT=300 for the big wheels on slow links.
 - Noise floor (2026-11-23, Mac, `urban.noise`, micro, seeds 42,1,2,3,4, demand fixed): baseline mean time loss
   194.2 s, sd 12.9 (6.7 %), range 173.7-209.3; seed 42 is the luckiest, so single seed-42 micro runs overstate harm.
   Paired over 5 seeds: c22 dT -12.6 % +- 12.0 (real effect, worse, Braess, ~278 veh/h); c24 -1.4 +- 12.6 and c25
