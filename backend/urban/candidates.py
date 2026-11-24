@@ -26,11 +26,18 @@ MIN_LEN, MAX_LEN = 50, 600   # m, straight-line length of a new road
 DETOUR = 2.0         # keep pair only if current network distance >= DETOUR x straight line (both directions)
 ROAD_HALF_WIDTH = 4  # m buffer for building/obstacle clearance
 END_TRIM = 8         # m trimmed off each end before clearance tests (endpoints sit on existing roads)
-WORKSITE_BUFFER = 15  # m around active metro/rail construction lines
+WORKSITE_BUFFER = 15  # m: crossing points of one corridor closer than 2x this count once (parallel tracks, split ways)
 MAX_DEMOLISH = int(os.environ.get("MAX_DEMOLISH", 3))  # buildings a road may cut through; cost proxy P (idea.md §7)
 TOP_K = 40           # feasible candidates passed on to Phase 4
 MAX_PER_SEED = 3     # diversity: at most this many selected candidates per seed junction
 NO_CONNECT = ("flyover", "ramp")  # junctions on elevated structures can't take a new at-grade road
+
+
+def worksite_crossings(core, corridors):
+    """True crossings of worksite centrelines, once per corridor crossing (user, 2026-11-24: roads running ALONGSIDE
+    the metro are preferred, so being near a worksite is free; only going over/under it is penalised)."""
+    return sum(shapely.get_num_geometries(x.buffer(WORKSITE_BUFFER))
+               for x in (core.intersection(c) for c in corridors) if not x.is_empty)
 
 
 def generate(area="hebbal", baseline="baseline"):
@@ -70,7 +77,10 @@ def generate(area="hebbal", baseline="baseline"):
 
     # 3. spatial constraints, in metric XY
     buildings, obstacles = STRtree(layer("buildings.geojson")), STRtree(layer("obstacles.geojson"))
-    worksites = STRtree([w.buffer(WORKSITE_BUFFER) for w in layer("construction.geojson")] or [Point(0, 0).buffer(0)])
+    # one merged centreline per worksite corridor (OSM name), e.g. Metro Phase 2B, Mallige Line
+    cons = gpd.read_file(d / "construction.geojson")
+    corridors = [shapely.transform(shapely.union_all(list(g.geometry)), to_xy)
+                 for _, g in cons.groupby(cons["name"].fillna(""))] if len(cons) else []
     road_edges = [e for e in nw.getEdges()]
     roads = STRtree([LineString(e.getShape()) for e in road_edges])
 
@@ -102,7 +112,7 @@ def generate(area="hebbal", baseline="baseline"):
             crossed = {road_edges[i].getID().lstrip("-").split("#")[0]
                        for i in roads.query(core, predicate="intersects") if road_edges[i].getID() not in touching}
             flags = {"road_crossings": len(crossed),
-                     "worksite_crossings": len(worksites.query(core, predicate="intersects"))}
+                     "worksite_crossings": worksite_crossings(core, corridors)}
             failed = (["building"] if hit > MAX_DEMOLISH else []) + (["obstacle"] if obstacle else [])
             status = f"rejected:{failed[0]}" if failed else "feasible"
             rows.append({"u": su, "v": vid, "length_m": round(straight, 1), "net_dist": round(net_dist, 1),

@@ -163,6 +163,15 @@ and shows everything in an interactive 3D interface.
     zipper (node -> type zipper) 101 s, 7 teleports, loop 3 -> 27 km/h, Anandnagar 0.5 -> 10; jb20
     (--ignore-junction-blocker 20) alone ~no change; act (all TLS actuated) worse, 220 s; all3 89 s, 8 teleports,
     frontage 238204954 1.7 -> 40 km/h, top-10 median 27 km/h. ORR 1073384218#0 stays 3-4 km/h in every variant.
+  - ZIPPER BASELINE ADOPTED (user, 2026-11-24): micro flyover 3,186 veh/h, 7 teleports, time loss 88 s. Pre-zipper
+    scenarios archived in data/hebbal/archive_v3_prezipper/. New candidates: 89 feasible, 40 from 14 seeds.
+    Worksite rule changed (user: roads ALONGSIDE the metro are preferred): `candidates.worksite_crossings()` counts true
+    centreline crossings once per corridor crossing (no 15 m proximity charge); 89 -> 35 crossings, 32/40 cross.
+  - MICRO 5-SEED CHECK of the macro top 10 (`noise_micro.csv`, baseline 87.1 s sd 4.7 %): macro and micro DISAGREE.
+    Only c39 (11395414076, 72 m, no crossing, ~195 veh/h) is a clean real gain: dT +9.4 +- 4.2 %, dQ -0.7 (noise),
+    score +9.4. c27 dT +8.5 but box queueing +36 %. Macro #1-3 c17/c16/c15 (junction 2408528584) are WORSE in micro
+    (dT -5..-8 %, box queueing ~doubles); c11/c22 (540-560 veh/h) -28/-32 % (Braess). c18/c19/c36 within noise.
+    Lesson: macro has no junction behaviour, so rank on micro validation of a macro shortlist.
   - OPEN: c03/c04 carry about 25 veh/h yet show dT -3.4 %, so the meso noise floor from rerouting chaos is a few %.
     Consider multiple seeds. c02/c07 report a mean duration identical to baseline (357.97) while timeLoss/routeLength
     differ. Suspect; dT may be better taken from mean_time_loss.
