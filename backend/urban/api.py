@@ -36,6 +36,7 @@ STEPS = {
     "noise": "micro multi-seed check (--cands 39,27 --workers 2)",
     "parallel": "speedup benchmark (--n 16 --workers 2,4)",
     "isolate": "one-change-at-a-time model tests (--variants ref,zipper)",
+    "combos": "greedy search for the best SET of roads (--pool 10 --max 4 --workers 4 --micro-seeds 5)",
     "fcd": "vehicle trajectories for the animation",
     "live": "TomTom real-traffic snapshot (needs TOMTOM_API_KEY)",
     "export": "write the JSON the UI reads",

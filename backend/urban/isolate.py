@@ -9,6 +9,7 @@ Writes data/<area>/isolate.csv. Runs go to sim/isolate/<variant>/ and are reused
 Usage: uv run python -m urban.isolate [area] [--variants ref,gap10,mix,mixgap] [--workers 2]
 """
 import json
+import os
 import statistics as st
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -43,6 +44,15 @@ VARIANTS = {
     "jb20": {"args": JB},
     "act": {"act": True},
     "all3": {"zipper": True, "args": JB, "act": True},
+    # Baiyappanahalli (2026-11-25): gridlock cluster of equal-priority 1-lane crossroads north of the Kasturinagar
+    # underpass (Kasturi Nagar Main Rd / 1st A Main / 2nd Main). allway = first-come-first-served instead of priority.
+    # (jb20 and actuated signals are already in sim.run / build_net.) A "join" variant (<join> the four into one) was
+    # dropped: joining deletes internal edges such as 747189509#0 that the local trips route over, so SUMO quits.
+    # prio: routing weighs road priority as well as travel time, so rerouted through traffic keeps to arterials
+    # instead of rat-running the 1-lane streets (vehroutes: 77-90 % of their traffic was through traffic)
+    "prio": {"args": ("--weights.priority-factor", "1")},
+    "allway": {"nodes": {n: "allway_stop" for n in ("3665627257", "2411848578", "442107271",
+                                                      "cluster_11084974472_13766575653")}},
 }
 
 
@@ -60,18 +70,25 @@ def actuated(net):
     return "".join(out)
 
 
-def zipper_net(net, out):
-    """The base net with one junction switched to type zipper (second netconvert pass, like urban.evaluate)."""
+def node_net(net, out, tag, types=None, join=()):
+    """The base net with junctions retyped ({id: type}) and/or joined into one (second netconvert pass)."""
     import subprocess
-    dst = out / "net_zipper.net.xml"
+    dst = out / f"net_{tag}.net.xml"
     if not dst.exists():
         out.mkdir(parents=True, exist_ok=True)
-        x, y = sumolib.net.readNet(str(net)).getNode(ZIPPER_NODE).getCoord()
-        nod = out / "zipper.nod.xml"
-        nod.write_text(f'<nodes><node id="{ZIPPER_NODE}" x="{x}" y="{y}" type="zipper"/></nodes>')
+        nw = sumolib.net.readNet(str(net))
+        nod = out / f"{tag}.nod.xml"
+        nod.write_text("<nodes>" + "".join(f'<node id="{n}" x="{nw.getNode(n).getCoord()[0]}" '
+                                           f'y="{nw.getNode(n).getCoord()[1]}" type="{t}"/>'
+                                           for n, t in (types or {}).items())
+                       + (f'<join nodes="{" ".join(join)}"/>' if join else "") + "</nodes>")
         subprocess.run([sumolib.checkBinary("netconvert"), "--sumo-net-file", str(net), "--node-files", str(nod),
                         "-o", str(dst), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
     return dst
+
+
+def zipper_net(net, out):
+    return node_net(net, out, "zipper", {ZIPPER_NODE: "zipper"})
 
 
 def job(args):
@@ -131,13 +148,17 @@ def isolate(area="hebbal", names=tuple(VARIANTS), workers=2):
     d = DATA / area
     net = d / "sim" / "net.net.xml"
     routes = make_demand(net, area)
-    root = d / "sim" / ("isolate" if DURATION == 3600 else f"isolate_d{DURATION}")   # short tests never mix in
+    root = d / "sim" / (("isolate" if DURATION == 3600 else f"isolate_d{DURATION}")   # short tests never mix in
+                        + "".join(f"_{t}{os.environ[k]}" for k, t in (("FLYOVER_RATE", "r"), ("LOCAL_RATE", "l"))
+                                  if k in os.environ))   # nor different demand levels
     names = ["ref", *[n for n in names if n != "ref"]]   # ref defines the bottleneck set
     jobs = []
     for n in names:
         v = VARIANTS[n] if isinstance(VARIANTS[n], dict) else {"xml": VARIANTS[n]}
         xml = v.get("xml", "") + (actuated(net) if v.get("act") else "")
-        jobs.append((zipper_net(net, root) if v.get("zipper") else net, routes, root / n, xml, v.get("args", ())))
+        n_net = (zipper_net(net, root) if v.get("zipper") else
+                 node_net(net, root, n, v.get("nodes"), v.get("join", ())) if "nodes" in v or "join" in v else net)
+        jobs.append((n_net, routes, root / n, xml, v.get("args", ())))
     with ProcessPoolExecutor(workers) as ex:
         res = dict(zip(names, ex.map(job, jobs)))
 
@@ -152,7 +173,7 @@ def isolate(area="hebbal", names=tuple(VARIANTS), workers=2):
     rows = [{"variant": n, **{k: res[n][k] for k in ("arrived", "teleports", "mean_time_loss", "sumo_s")},
              **analyse(nw, bbox, root / n, hot, live)} for n in names]
     df = pd.DataFrame(rows)
-    df.to_csv(d / "isolate.csv", index=False)
+    df.to_csv(d / f"isolate_{root.name}.csv" if root.name != "isolate" else d / "isolate.csv", index=False)
     cols = [c for c in df.columns if not c.startswith("kmh_")]
     print(df[cols].round(2).to_string(index=False))
     print("\nkm/h on the reference top-10 box bottlenecks:")

@@ -9,6 +9,7 @@ Usage: uv run python -m urban.evaluate [area] [--limit N] [--screen macro|meso] 
        (default: hebbal, all selected, macro, K=0, P=1 = sequential)
 """
 import json
+import math
 import os
 from concurrent.futures import ProcessPoolExecutor
 import subprocess
@@ -40,26 +41,42 @@ WEIGHTS = {"dT": 1.0, "dQ": 0.5, "dC": 0.01, "L": 0.002, "P": 0.25}
 # (user, 2026-11-24: crossing the metro works is heavily penalised, 22 x WEIGHTS["P"] = 5.5 score points each,
 # so a crossing candidate only wins on a large gain; at 1 it cost 0.25 points, nothing next to dT/dQ of 1-8)
 # In-service rail (user, 2026-11-25): crossings are rejected in candidates.py unless over vacant land; those that
-# remain cost 30 = 7.5 points each, more than the metro works.
-P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 22.0, "rail_crossings": 30.0}
+# remain cost 30 = 7.5 points each, more than the metro works. Crossing a flyover/ramp (third level or deep underpass)
+# costs 22 = 5.5 points, like the metro (user, 2026-11-26); candidates.py counts it apart from ground roads.
+P_COST = {"buildings_hit": 1.0, "road_crossings": 0.5, "worksite_crossings": 22.0, "rail_crossings": 30.0,
+          "flyover_crossings": 22.0}
+# Entry connections into a new road that turn more than this (degrees) are not built: U-turns and very sharp turns
+# would need extra lanes or a loop (user, 2026-11-26). On Hebbal this drops 23 of 136 entries: all 14 U-turns and
+# 9 of the 17 sharp (120-160 degree) ones.
+MAX_TURN = 135
+MAX_SET = 6   # most roads one scenario may hold (urban.combos); their edges count as study-box edges
+
+
+def cand_ids(k):
+    """Edge ids of the k-th road in a scenario; k=0 keeps the single-road ids (and their checkpoints)."""
+    return CAND_EDGES if k == 0 else tuple(f"{e}{k}" for e in CAND_EDGES)
 
 
 def scenario_net(base, cand, incoming, out):
-    """netconvert the base net plus the candidate (both directions). cand=None: plain round trip, so the
-    baseline goes through the same netconvert pass as every scenario (fair comparison)."""
+    """netconvert the base net plus the candidate(s) (both directions). cand = one row, a list of rows (a set of
+    roads, urban.combos) or None: plain round trip, so the baseline goes through the same netconvert pass as every
+    scenario (fair comparison)."""
     out.mkdir(parents=True, exist_ok=True)
     net, cmd = out / "net.net.xml", [sumolib.checkBinary("netconvert"), "--sumo-net-file", str(base)]
-    if cand is not None:
+    cands = [] if cand is None else cand if isinstance(cand, list) else [cand]
+    if cands:
+        dirs = [(f, b, c.u, c.v) for k, c in enumerate(cands) for f, b in [cand_ids(k)]]
         edg = out / "cand.edg.xml"
         edg.write_text("<edges>" + "".join(
             f'<edge id="{eid}" from="{a}" to="{b}" numLanes="{CAND_LANES}" speed="{CAND_SPEED:.2f}" name="candidate"/>'
-            for eid, a, b in ((CAND_EDGES[0], cand.u, cand.v), (CAND_EDGES[1], cand.v, cand.u))) + "</edges>")
-        # a loaded .net.xml keeps its connections as-is, so nothing would turn INTO the new road: add them
+            for f, bk, u, v in dirs for eid, a, b in ((f, u, v), (bk, v, u))) + "</edges>")
+        # a loaded .net.xml keeps its connections as-is, so nothing would turn INTO the new road: add them, only from
+        # incoming edges that turn <= MAX_TURN into it (setup() filters; keyed by (start node, end node))
         con = out / "cand.con.xml"
         con.write_text("<connections>" + "".join(
             f'<connection from="{e}" to="{eid}" fromLane="0" toLane="{k}"/>'  # edge-level ones are ignored
-            for eid, j in ((CAND_EDGES[0], cand.u), (CAND_EDGES[1], cand.v))
-            for e in incoming[j] for k in range(CAND_LANES)) + "</connections>")
+            for f, bk, u, v in dirs for eid, j, o in ((f, u, v), (bk, v, u))
+            for e in incoming[(j, o)] for k in range(CAND_LANES)) + "</connections>")
         cmd += ["--edge-files", str(edg), "--connection-files", str(con)]
     subprocess.run(cmd + ["-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
     return net
@@ -77,7 +94,7 @@ def simulate(base, routes, box, cand, incoming, out, mode, seed=SEED):
     net.unlink()           # 30 MB per scenario; rebuild from cand.edg.xml if needed
     (out / "tripinfo.xml").unlink(missing_ok=True)
     m["box_waiting"] = sum(s["waiting"] for eid, s in edges.items() if eid in box)
-    m["cand_vph"] = sum(edges.get(e, {}).get("entered", 0) for e in CAND_EDGES) * 3600 / DURATION
+    m["cand_vph"] = sum(s["entered"] for e, s in edges.items() if e.startswith("cand_")) * 3600 / DURATION
     m["seconds"] = time.perf_counter() - t0
     done.write_text(json.dumps(m))
     return m
@@ -111,11 +128,24 @@ def setup(area):
     base = d / "sim" / "net.net.xml"
     routes = make_demand(base, area)   # deterministic (seed 42): identical demand for baseline and every scenario
     nw = sumolib.net.readNet(str(base))
-    box = {e.getID() for e in nw.getEdges() if in_box(nw, e, AREAS[area])} | set(CAND_EDGES)
+    box = {e.getID() for e in nw.getEdges() if in_box(nw, e, AREAS[area])} | {e for k in range(MAX_SET)
+                                                                                 for e in cand_ids(k)}
     cands = gpd.read_file(d / "candidates.geojson")
     cands = cands[cands.status == "selected"].sort_values("prescore", ascending=False).reset_index(drop=True)
-    incoming = {j: [e.getID() for e in nw.getNode(j).getIncoming()] for j in set(cands.u) | set(cands.v)}
+    incoming = {(j, o): entries(nw, j, o) for u, v in zip(cands.u, cands.v) for j, o in ((u, v), (v, u))}
     return d, base, routes, box, cands, incoming
+
+
+def turn(nw, edge, j, o):
+    """Degrees an incoming edge turns at node j to head straight for node o (0 = straight on, 180 = U-turn)."""
+    (x1, y1), (x2, y2) = edge.getShape()[-2:]
+    (ax, ay), (bx, by) = nw.getNode(j).getCoord(), nw.getNode(o).getCoord()
+    d = math.degrees(math.atan2(by - ay, bx - ax) - math.atan2(y2 - y1, x2 - x1))
+    return abs((d + 180) % 360 - 180)
+
+
+def entries(nw, j, o):
+    return [e.getID() for e in nw.getNode(j).getIncoming() if turn(nw, e, j, o) <= MAX_TURN]
 
 
 def sweep(env, rows, mode, root, workers=1, quiet=False):

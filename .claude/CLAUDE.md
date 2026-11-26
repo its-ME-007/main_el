@@ -270,5 +270,15 @@ Append dated decisions here (locality chosen, sim model, repo layout, etc.).
   (brownfield/greenfield/grass/scrub), priced 30 P = 7.5 points. data.py writes rail.geojson + vacant.geojson.
   Hebbal NOT regenerated: 31/40 of its selected candidates cross the main line (alongside the Mallige works), incl.
   macro c17/c16/c15/c11/c22, but not the micro winner c39 or c27, so the Hebbal conclusion stands.
+- 2026-11-26: Candidate rules (user): crossing a flyover/ramp = `flyover_crossings`, 22 P (5.5 points, like metro),
+  no longer counted in road_crossings; entry connections into a new road turning > `MAX_TURN` 135 deg are not built
+  (`evaluate.setup` keys `incoming` by (node, other end); Hebbal: drops 23 of 136, all 14 U-turns + 9 sharp).
+  Endpoints on flyover/ramp/_link junctions were already excluded (NO_CONNECT), so a road never meets a flyover.
+  `scenario_net` takes a list of rows (edges cand_f/cand_b, cand_f1/cand_b1, ...); new `urban.combos` = greedy set
+  search on macro (pool = macro top 10, members share no endpoint and don't cross) + `--micro-seeds N` paired check;
+  writes combos_macro.csv / combos_micro.csv, exported as combos.json. Hebbal regenerated under the new + rail rules
+  (data refetched for rail.geojson): 84 rejected:rail, 45 feasible, 22 selected from 8 seeds, 5 cross a flyover;
+  old c39 -> new c17, old c27 -> new c07. Old candidate results in data/hebbal/archive_v4_preturn/ (baselines kept).
+  Pending (user's terminal): evaluate -> noise top 10 -> combos -> export.
 - 2026-11-20: Dev/test locality = Koramangala bbox (77.6150, 12.9250, 77.6300, 12.9400), drive network,
   trimmed to the largest strongly connected component (441 nodes, 1101 edges, 4084 buildings, 30 obstacles).

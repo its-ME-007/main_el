@@ -113,10 +113,12 @@ def generate(area="hebbal", baseline="baseline"):
             # Crossings are allowed as grade separations (bridge/underpass) and priced in Phase 4's penalty P.
             # SUMO needs no extra modelling: an edge crossing another without a shared junction is grade-separated.
             # Opposite directions (id / -id) of one road count once.
-            crossed = {road_edges[i].getID().lstrip("-").split("#")[0]
+            crossed = {road_edges[i].getID().lstrip("-").split("#")[0]: road_edges[i].getName().lower()
                        for i in roads.query(core, predicate="intersects") if road_edges[i].getID() not in touching}
+            # crossing an elevated road (flyover/ramp) needs a third level or a deep underpass (user, 2026-11-26)
+            elevated = sum(any(k in name for k in NO_CONNECT) for name in crossed.values())
             x_rail = core.intersection(rail)
-            flags = {"road_crossings": len(crossed),
+            flags = {"road_crossings": len(crossed) - elevated, "flyover_crossings": elevated,
                      "worksite_crossings": worksite_crossings(core, corridors),
                      "rail_crossings": worksite_crossings(core, [rail]) if not x_rail.is_empty else 0}
             failed = (["building"] if hit > MAX_DEMOLISH else []) + (["obstacle"] if obstacle else []) \

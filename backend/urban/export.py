@@ -11,6 +11,8 @@ Writes into data/<area>/:
   noise.json             repeated runs from urban.noise: {variant: {label, sim, seeds, baseline: {mean_time_loss, sd,
                          min, max}, cands: {cand: {n, dT, dT_sd, dT_min, dT_max, score, score_sd, cand_vph, verdict}}}}
                          variant "" = the evaluated candidates (1 lane, 40 km/h); "l2v60" = 2 lanes, 60 km/h, ...
+  combos.json            sets of roads from urban.combos: {"macro": combos_macro.csv records (step, set, dT, dQ, P,
+                         synergy, score, kept), "micro": combos_micro.csv records (per seed)}
 
 Stats keep only edges that saw traffic (entered > 0); a missing edge means no vehicles.
 Usage: uv run python -m urban.export [area]   (default: hebbal)
@@ -131,6 +133,13 @@ def export(area="hebbal"):
     noise = noise_runs(d)
     if noise:
         dump(noise, d / "noise.json")
+    combos = {k: pd.read_csv(d / f"combos_{k}.csv").round(3).to_dict(orient="records")
+              for k in ("macro", "micro") if (d / f"combos_{k}.csv").exists()}
+    if combos:   # urban.combos: sets of candidate roads
+        for run in sorted((d / "sim" / "combos").glob("*_macro/netload.xml")):
+            if any(run.parent.glob("metrics_*.json")):
+                dump(macro_edge_stats(run), sd / f"{run.parent.name}.json")
+        dump(combos, d / "combos.json")
     write_areas()
 
 

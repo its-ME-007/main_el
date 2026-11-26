@@ -17,9 +17,8 @@ SEED = 42            # same seed -> same demand for baseline and every candidate
 DURATION = int(os.environ.get("DURATION", 3600))  # s of departures; 900 is enough for calibration sweeps
 REROUTE = os.environ.get("REROUTE", "1") != "0"   # REROUTE=0: keep free-flow routes (noise-source test)
 # Calibration knobs (override via env for sweeps). Through traffic = flows between arterial boundary edges,
-# split by whether the pair's free-flow route uses the Hebbal flyover, so the flyover can be loaded to
-# its surveyed volume without inflating every other road.
-FLYOVER_RATE = int(os.environ.get("FLYOVER_RATE", 3030))  # veh/h total over pairs routed via the main flyover
+# split by whether the pair's free-flow route uses the area's surveyed road (CALIB), so that road can be loaded to
+# its surveyed volume without inflating every other road. FLYOVER_RATE overrides the area's default rate.
 OTHER_RATE = int(os.environ.get("OTHER_RATE", 3800))      # veh/h total over the remaining arterial pairs
 LOCAL_RATE = int(os.environ.get("LOCAL_RATE", 2000))      # veh/h random local trips, biased into the study box
 BOX_WEIGHT = 10      # local trip origin/destination weight for edges inside the study box (others = 1)
@@ -28,7 +27,24 @@ ARTERIAL = ("highway.motorway", "highway.trunk", "highway.primary")
 # (Bengaluru flyover volume/capacity study, reported by Deccan Herald). Junction total per RITES: 26,896 PCU/h.
 # In OSM that carriageway is the highway=trunk "Hebbal Flyover" (way 377832181, 3 lanes, 60 km/h); the other
 # "Hebbal Flyover"/"Flyover" ways are trunk_link loops/ramps (1-3 lanes, 30 km/h) and are not the surveyed road.
-FLYOVER_TARGET_VPH = 3225
+# Baiyappanahalli (user, 2026-11-25): B-SMILE Yeshwanthpur-KR Puram elevated corridor DPR (Infra Support Engineering),
+# TVC 02 "Near NGEF, Old Madras Road", 20.05.2025: 200,183 PCU/day, peak 21,789 PCU/h (V/C 4.04), split 53:47.
+# A 6-lane road cannot carry 21,789 PCU/h, so the road is taken as SATURATED: DPR design capacity 5,400 PCU/h two-way
+# x 53 % = 2,860 PCU/h in the busier (westbound) direction. Here OMR is named "Swamy Vivekananda Road" in OSM.
+# Sweep (15 min, rates 4,000/5,400/7,000): OMR flow plateaus at ~1,850-1,950 veh/h whatever the demand, capped by the
+# netconvert-guessed 39/90 s split at TLS 481750173 (westbound) and a 2-lane OSM stretch 328758436#2 ending at a
+# pedestrian signal (eastbound). Accepted as a model limit (user, 2026-11-25): sim capacity ~32 % below the real one,
+# demand first kept at the DPR's 5,400 so the road is saturated as observed (LOS F). But 5,400 is ~40 % above what the
+# sim road carries, so queues grew all hour (full hour: 501 teleports, time loss 1,287 s). Default 4,000 (user,
+# 2026-11-25) = demand ~ sim capacity: still saturated, queues bounded (30 min: 52 teleports, 496 s vs 73 / 582 s).
+# urban.isolate (30 min) also tried allway junctions, half local demand and --weights.priority-factor 1: none helped.
+# 1st A Main Rd 1535119254 / 2nd Main Rd -232875115#0 (1-lane, north of the Kasturinagar underpass) stay ~1 km/h in
+# every variant: a known limitation, like Hebbal's ORR 1073384218#0. 77-90 % of their traffic is rerouted through
+# traffic, but only 26-36 vehicles per 30 min use them.
+# area -> (OSM highway type, name, target veh/h on its busiest in-box edge, default total rate over pairs using it)
+CALIB = {"hebbal": ("highway.trunk", "hebbal flyover", 3225, 3030),
+         "baiyappanahalli": ("highway.primary", "swamy vivekananda road", 2860, 4000)}
+FLYOVER_TARGET_VPH = 3225   # Hebbal; other areas: CALIB[area][2]
 # Speeds for OSM ways WITHOUT a maxspeed tag. netconvert's typemap defaults are 80-100 km/h for tertiary/secondary/
 # trunk, faster than the 60 km/h flyover, so rerouting sent Bellary Rd through traffic down the unnamed tertiary
 # service road 238204954, which then jammed merging back. Values = median maxspeed that OSM mappers tagged on the same
@@ -68,7 +84,12 @@ def untagged_speeds(raw, net):
 
 
 def is_flyover_main(nw, edge, bbox):
-    return edge.getType() == "highway.trunk" and "hebbal flyover" in edge.getName().lower() and in_box(nw, edge, bbox)
+    """The surveyed calibration road of whichever CALIB area this bbox is (name kept from the Hebbal flyover)."""
+    return any(edge.getType() == kind and name in edge.getName().lower() for kind, name, *_ in CALIB.values())         and in_box(nw, edge, bbox)
+
+
+def calib_rate(area):
+    return int(os.environ.get("FLYOVER_RATE", CALIB.get(area, (0, 0, 0, 0))[3]))
 
 
 def flyover_flow(net, edges, bbox):
@@ -117,9 +138,10 @@ def make_demand(net, area, seed=SEED):
                 uses = any(is_flyover_main(nw, e, AREAS[area]) for e in path)
                 (fly if uses else other).append((a, b))
     assert fly or other, "no routable arterial entry->exit pairs"
-    if not fly:   # area without the surveyed flyover: one uncalibrated through rate (OTHER_RATE) over all pairs
+    if not fly:   # area without a surveyed road: one uncalibrated through rate (OTHER_RATE) over all pairs
         print("  no calibration road in this area: through demand uncalibrated")
-    rated = ([(p, FLYOVER_RATE / len(fly)) for p in fly] if fly else []) + [(p, OTHER_RATE / len(other)) for p in other]
+    rate = calib_rate(area)
+    rated = ([(p, rate / len(fly)) for p in fly] if fly else []) + [(p, OTHER_RATE / len(other)) for p in other]
     flows = "".join(f'<flow id="through{i}" from="{a.getID()}" to="{b.getID()}" begin="0" end="{DURATION}" '
                     f'vehsPerHour="{vph:.2f}" departLane="best" departSpeed="max"/>'
                     for i, ((a, b), vph) in enumerate(rated))
@@ -136,7 +158,7 @@ def make_demand(net, area, seed=SEED):
         "-b", "0", "-e", str(DURATION), "--insertion-rate", str(LOCAL_RATE), "--seed", str(seed),
         "--weights-prefix", str(d / "w"), "--min-distance", "300", "--validate", "--prefix", "local",
     ], check=True, stdout=subprocess.DEVNULL)
-    print(f"demand: {len(fly)} flyover pairs @ {FLYOVER_RATE / max(1, len(fly)):.0f} veh/h, "
+    print(f"demand: {len(fly)} calibration-road pairs @ {rate / max(1, len(fly)):.0f} veh/h, "
           f"{len(other)} other pairs @ {OTHER_RATE / max(1, len(other)):.0f} veh/h, local {LOCAL_RATE} veh/h")
     return [d / "through.rou.xml", local]
 
@@ -233,14 +255,16 @@ if __name__ == "__main__":
     t2 = time.perf_counter(); metrics, edges = run(net, routes, net.parent / ("baseline_meso" if meso else "baseline"), meso=meso)
     t3 = time.perf_counter()
     assert metrics["arrived"] > 0 and edges, "simulation produced no traffic"
-    # through vehicles actually written (areas without the flyover have no FLYOVER_RATE share)
+    # through vehicles actually written (areas without a surveyed road have no calibration share)
     through = sum(float(f.vehsPerHour) for f in sumolib.xml.parse(str(routes[0]), "flow")) * DURATION / 3600
     assert metrics["loaded"] > through * 1.1, "local trips missing: check randomTrips weights"
     for k, v in metrics.items():
         print(f"{k:>18}: {v:,.1f}")
     print(f"timing s: netconvert={t1 - t0:.0f} demand={t2 - t1:.0f} sumo={t3 - t2:.0f}")
     print(f"traffic lights: {len(sumolib.net.readNet(str(net)).getTrafficLights())}")
-    print(f"flyover peak flow: {flyover_flow(net, edges, AREAS[area]):,.0f} veh/h (survey {FLYOVER_TARGET_VPH:,} PCU/h)")
+    if area in CALIB:
+        print(f"calibration road peak flow: {flyover_flow(net, edges, AREAS[area]):,.0f} veh/h "
+              f"(target {CALIB[area][2]:,} PCU/h, {CALIB[area][1]})")
     print("\ntop study-box bottlenecks (time loss s, edge, name, speed/limit, occupancy %):")
     for tl, eid, name, ratio, occ in bottlenecks(net, edges, AREAS[area]):
         print(f"  {tl:>9,.0f}  {eid:<22} {name[:30]:<30} {ratio:5.2f}  {occ:5.1f}")
