@@ -280,5 +280,13 @@ Append dated decisions here (locality chosen, sim model, repo layout, etc.).
   (data refetched for rail.geojson): 84 rejected:rail, 45 feasible, 22 selected from 8 seeds, 5 cross a flyover;
   old c39 -> new c17, old c27 -> new c07. Old candidate results in data/hebbal/archive_v4_preturn/ (baselines kept).
   Pending (user's terminal): evaluate -> noise top 10 -> combos -> export.
+- 2026-11-27: TomTom validation (committed snapshot backend/tomtom/tomtom_live_2026-11-27.json, 18:34-18:35 peak):
+  sim finds the right corridors (Bellary Rd; Old Madras Rd = sim's #1) but drives too fast (Hebbal 43.3 vs 16.8 km/h;
+  TomTom free flow 22-28 km/h vs sim limits 46-50). MINIMAL PATCH `SPEEDS=tomtom` (sim.py `tomtom_speeds`): sampled
+  edges get TomTom free flow, others x their road type's median ratio (Hebbal: tertiary 0.36, trunk 0.72, others
+  0.38); separate data/<area>/sim_tomtom/. Hebbal result: sim 20.0 vs real 16.8 km/h (bias +26.5 -> +3.2, MAE 26.5 ->
+  5.8, within 10 km/h 2/24 -> 18/24), 8,831 arrived, 0 teleports, flyover 3,096 (target 3,225). `urban.validate
+  <area> [sim|sim_tomtom]` reproduces it. Candidates/results NOT re-run on it yet (presentation 2026-11-28 uses the
+  default net); full re-evaluation on sim_tomtom is the next step (needs evaluate/noise/combos to read sim_tomtom).
 - 2026-11-20: Dev/test locality = Koramangala bbox (77.6150, 12.9250, 77.6300, 12.9400), drive network,
   trimmed to the largest strongly connected component (441 nodes, 1101 edges, 4084 buildings, 30 obstacles).

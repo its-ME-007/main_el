@@ -16,6 +16,12 @@ SUMO_HOME = Path(os.environ["SUMO_HOME"])
 SEED = 42            # same seed -> same demand for baseline and every candidate
 DURATION = int(os.environ.get("DURATION", 3600))  # s of departures; 900 is enough for calibration sweeps
 REROUTE = os.environ.get("REROUTE", "1") != "0"   # REROUTE=0: keep free-flow routes (noise-source test)
+# SPEEDS=tomtom (2026-11-27, minimal patch after the TomTom validation): real Bengaluru free-flow speeds are ~20-30 km/h,
+# far below the posted limits the net uses (sim 43 vs real 17 km/h at Hebbal). Sampled edges get TomTom's free-flow
+# speed; every other edge is scaled by its road type's median (TomTom free flow / net speed) in this area. Writes a
+# separate data/<area>/sim_tomtom/ (net, demand, baseline), so the default net and all results stay untouched.
+SPEEDS = os.environ.get("SPEEDS", "")
+TOMTOM_FILE = Path(__file__).resolve().parent.parent / "tomtom" / "tomtom_live_2026-11-27.json"   # committed snapshot
 # Calibration knobs (override via env for sweeps). Through traffic = flows between arterial boundary edges,
 # split by whether the pair's free-flow route uses the area's surveyed road (CALIB), so that road can be loaded to
 # its surveyed volume without inflating every other road. FLYOVER_RATE overrides the area's default rate.
@@ -65,12 +71,15 @@ def untagged_speeds(raw, net):
     import xml.etree.ElementTree as ET
     dflt = {t.get("id"): float(t.get("speed")) for t in
             ET.parse(SUMO_HOME / "data" / "typemap" / "osmNetconvert.typ.xml").getroot().iter("type")}
-    edges = []
     nw = sumolib.net.readNet(str(raw))
+    speed = {}   # edge id -> m/s, only edges whose speed changes
     for e in nw.getEdges():
         kind = e.getType().removeprefix("highway.")
         if kind in UNTAGGED_KMH and abs(e.getSpeed() - dflt.get(e.getType(), -1)) < 0.01:
-            edges.append(f'<edge id="{e.getID()}" speed="{UNTAGGED_KMH[kind] / 3.6:.2f}"/>')
+            speed[e.getID()] = UNTAGGED_KMH[kind] / 3.6
+    if SPEEDS == "tomtom":
+        speed = tomtom_speeds(nw, speed, net.parent.parent.name)
+    edges = [f'<edge id="{eid}" speed="{v:.2f}"/>' for eid, v in speed.items()]
     edg = net.parent / "untagged_speeds.edg.xml"
     edg.write_text("<edges>\n" + "\n".join(edges) + "\n</edges>\n")
     nod = net.parent / "zipper.nod.xml"   # same pass: ZIPPER_NODES become zipper merges
@@ -81,6 +90,27 @@ def untagged_speeds(raw, net):
     subprocess.run([sumolib.checkBinary("netconvert"), "--sumo-net-file", str(raw), "--edge-files", str(edg),
                     "--node-files", str(nod), "-o", str(net), "--no-warnings"], check=True, stdout=subprocess.DEVNULL)
     return len(edges)
+
+
+def tomtom_speeds(nw, speed, area):
+    """SPEEDS=tomtom: free-flow speeds from the TomTom snapshot (see SPEEDS). Returns the updated {edge: m/s}."""
+    import json
+    import statistics as st
+    pts = [p for p in json.loads(TOMTOM_FILE.read_text())["areas"][area]["points"]
+           if p.get("free_flow_kmh") and nw.hasEdge(p["edge"])]
+    cur = lambda e: speed.get(e.getID(), e.getSpeed())
+    ratio = {}
+    for p in pts:
+        e = nw.getEdge(p["edge"])
+        ratio.setdefault(e.getType(), []).append(p["free_flow_kmh"] / 3.6 / cur(e))
+    every = st.median(r for rs in ratio.values() for r in rs)
+    ratio = {t: st.median(rs) for t, rs in ratio.items()}
+    out = {e.getID(): cur(e) * min(1.0, ratio.get(e.getType(), every)) for e in nw.getEdges()
+           if e.getType().startswith("highway.")}
+    out.update({p["edge"]: max(5.0, p["free_flow_kmh"]) / 3.6 for p in pts})   # sampled edges: TomTom's own value
+    print(f"  TomTom free-flow speeds: {len(pts)} sampled edges; type factors "
+          + ", ".join(f"{t.removeprefix('highway.')} {r:.2f}" for t, r in sorted(ratio.items())) + f"; others {every:.2f}")
+    return out
 
 
 def is_flyover_main(nw, edge, bbox):
@@ -100,7 +130,7 @@ def flyover_flow(net, edges, bbox):
 
 
 def build_net(area):
-    out = DATA / area / "sim"
+    out = DATA / area / ("sim_tomtom" if SPEEDS == "tomtom" else "sim")
     out.mkdir(exist_ok=True)
     net, raw = out / "net.net.xml", out / "raw.net.xml"
     subprocess.run([
