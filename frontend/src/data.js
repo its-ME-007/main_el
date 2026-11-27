@@ -1,7 +1,7 @@
 // Loads the backend exports (RESPONSIBILITIES.md interface contract). All geometry is WGS84.
 // The study area is Hebbal; ?area=<name> loads another exported area (data/areas.json lists them with their boxes).
 export const AREA = new URLSearchParams(location.search).get('area') || 'hebbal'
-export const AREA_NAMES = { hebbal: 'Hebbal', koramangala: 'Koramangala' }
+export const AREA_NAMES = { hebbal: 'Hebbal', koramangala: 'Koramangala', baiyappanahalli: 'Baiyappanahalli – Benniganahalli' }
 export const areaName = a => AREA_NAMES[a] || a
 // Fallback study boxes (west, south, east, north), same as AREAS in backend/urban/data.py
 const BBOXES = { hebbal: [77.5890, 13.0290, 77.6050, 13.0430] }

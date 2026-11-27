@@ -21,7 +21,7 @@ import sys
 import geopandas as gpd
 import pandas as pd
 
-from urban.data import AREAS
+from urban.data import AREAS, DATA
 from urban.evaluate import MAX_SET, VARIANT, WEIGHTS, run_all, score, setup
 from urban.noise import run_dir, verdict
 from urban.sim import DURATION, SEED
@@ -113,6 +113,11 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     opt = lambda k, dflt: int(args[args.index(k) + 1]) if k in args else dflt
     area = next((a for a in args if a in AREAS), "hebbal")
+    if "--set" in args:   # micro-check a given set only, e.g. --set 9,11 (no search); writes combos_micro_<set>.csv
+        members = [int(x) for x in args[args.index("--set") + 1].split(",")]
+        out = micro(setup(area), members, SEEDS[:opt("--micro-seeds", 5)])
+        out.to_csv(DATA / area / f"combos_micro_{name(members)}{VARIANT}.csv", index=False)
+        sys.exit()
     env, best, df = search(area, opt("--pool", 10), opt("--max", 4), opt("--workers", 4))
     kept = df[df.kept]
     assert kept.score.is_monotonic_increasing, "greedy steps must not lower the score"
