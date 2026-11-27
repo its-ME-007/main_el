@@ -17,6 +17,7 @@ Study areas: **Hebbal** (Bellary Road × Outer Ring Road flyover junction, metro
 
 | Document | What it covers |
 |---|---|
+| [docs/pipeline.md](docs/pipeline.md) | Every pipeline step in order, with its command, input and output |
 | [docs/study_guide_backend.md](docs/study_guide_backend.md) | Pipeline step by step, data sources, baseline metrics, the macro screen and the micro check, scoring, results |
 | [docs/study_guide_frontend.md](docs/study_guide_frontend.md) | The 3D interface: data loading, scene, shaders, bridges, vehicle animation, panels, interaction |
 | [docs/pagp_cgvr_justification.md](docs/pagp_cgvr_justification.md) | Why the parallel computing (PAGP) and graphics (CGVR) components qualify, and what they show |
