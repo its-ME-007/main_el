@@ -15,7 +15,7 @@ from urban.sim import TOMTOM_FILE
 
 
 def validate(area, sim_dir="sim"):
-    pts = [p for p in json.loads(TOMTOM_FILE.read_text())["areas"][area]["points"]
+    pts = [p for p in json.loads(TOMTOM_FILE.read_text())["areas"][area.removesuffix("_tt")]["points"]
            if p.get("current_kmh") and not p.get("closed")]
     d = DATA / area / sim_dir
     nw = sumolib.net.readNet(str(d / "net.net.xml"))

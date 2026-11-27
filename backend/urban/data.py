@@ -29,6 +29,9 @@ AREAS = {
     # Benniganahalli Flyover.
     "baiyappanahalli": (77.6500, 12.9850, 77.6720, 13.0030),
 }
+# <area>_tt = the same box with TomTom free-flow speeds (sim.py SPEEDS), in its own data/<area>_tt/ folder, so a full
+# re-evaluation never touches the default results (user, 2026-11-27). Fetch it like any area: urban.data hebbal_tt.
+AREAS |= {f"{a}_tt": AREAS[a] for a in ("hebbal", "baiyappanahalli")}
 
 ROAD_PAD = 0.01  # degrees (~1.1 km) of road network kept around each area
 

@@ -91,3 +91,27 @@ To do (in this order, one SUMO job at a time):
    `urban.noise baiyappanahalli --cands <macro top 10> --workers 2` (micro, 5 seeds; rank on THIS, not on macro) ->
    `urban.export baiyappanahalli`; the UI opens it with `?area=baiyappanahalli` (add a display name to `AREA_NAMES`
    in `frontend/src/data.js`).
+
+## Next: re-validate the pipeline on TomTom free-flow speeds — teammate task (2026-11-27)
+Why: the TomTom peak snapshot (`backend/tomtom/tomtom_live_2026-11-27.json`) showed the default net drives far too
+fast (Hebbal sim 43.3 vs real 16.8 km/h: the net uses posted limits, real free flow is 22-28 km/h). The minimal fix
+is in `sim.py` (`tomtom_speeds`): sampled edges get TomTom's free-flow speed, every other edge is scaled by its road
+type's median ratio. Validated on Hebbal: sim 20.0 vs real 16.8 km/h, bias +26.5 -> +3.2, MAE 26.5 -> 5.8, roads
+within 10 km/h 2/24 -> 18/24, 8,831 vehicles all arrived, 0 teleports, flyover 3,096 veh/h (target 3,225).
+
+How: the areas `hebbal_tt` and `baiyappanahalli_tt` (data.py) are the same boxes with TomTom speeds always on, in
+their own `data/<area>_tt/` folders, so nothing touches the default results used in the presentation. Every step
+works unchanged with the alias. One simulation at a time, in a plain PowerShell window (`cd backend`):
+
+1. Hebbal (~2-2.5 h):
+   `uv run python -m urban.data hebbal_tt` -> `uv run python -m urban.sim hebbal_tt` ->
+   `uv run python -m urban.validate hebbal_tt` (expect ~20 vs 16.8 km/h) -> `urban.candidates hebbal_tt` ->
+   `urban.evaluate hebbal_tt --workers 4` -> `urban.noise hebbal_tt --cands <macro top 10> --workers 2` ->
+   `urban.combos hebbal_tt --pool 10 --max 4 --workers 4 --micro-seeds 5` -> `urban.export hebbal_tt`.
+   Candidate numbers differ from `hebbal` (new hot spots), so compare roads by their (u, v) junctions, not by cNN.
+2. Baiyappanahalli (~5-7 h, the micro check is the long part): same steps with `baiyappanahalli_tt`. Set
+   `$env:FLYOVER_RATE=1830; $env:OTHER_RATE=1970` for EVERY step (the stable demand used for `baiyappanahalli`), and
+   first check `urban.validate baiyappanahalli_tt`: if the sim is now much slower than TomTom, lower the rates.
+3. Compare: does the Hebbal winner (c11's junctions, 163095719#2-AddedOffRampNode -> 7304953142) and Baiyappanahalli's
+   c22 (481741594 -> 2411848590) still win? The UI shows each alias as its own area (`?area=hebbal_tt`).
+`SPEEDS=tomtom` on the default area name is the quick check only (writes `data/<area>/sim_tomtom/`, baseline only).

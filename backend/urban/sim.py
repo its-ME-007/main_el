@@ -77,8 +77,9 @@ def untagged_speeds(raw, net):
         kind = e.getType().removeprefix("highway.")
         if kind in UNTAGGED_KMH and abs(e.getSpeed() - dflt.get(e.getType(), -1)) < 0.01:
             speed[e.getID()] = UNTAGGED_KMH[kind] / 3.6
-    if SPEEDS == "tomtom":
-        speed = tomtom_speeds(nw, speed, net.parent.parent.name)
+    area = net.parent.parent.name
+    if SPEEDS == "tomtom" or area.endswith("_tt"):   # <area>_tt aliases always use TomTom speeds (data.py)
+        speed = tomtom_speeds(nw, speed, area.removesuffix("_tt"))
     edges = [f'<edge id="{eid}" speed="{v:.2f}"/>' for eid, v in speed.items()]
     edg = net.parent / "untagged_speeds.edg.xml"
     edg.write_text("<edges>\n" + "\n".join(edges) + "\n</edges>\n")
@@ -119,7 +120,7 @@ def is_flyover_main(nw, edge, bbox):
 
 
 def calib_rate(area):
-    return int(os.environ.get("FLYOVER_RATE", CALIB.get(area, (0, 0, 0, 0))[3]))
+    return int(os.environ.get("FLYOVER_RATE", CALIB.get(area.removesuffix("_tt"), (0, 0, 0, 0))[3]))
 
 
 def flyover_flow(net, edges, bbox):
@@ -292,9 +293,9 @@ if __name__ == "__main__":
         print(f"{k:>18}: {v:,.1f}")
     print(f"timing s: netconvert={t1 - t0:.0f} demand={t2 - t1:.0f} sumo={t3 - t2:.0f}")
     print(f"traffic lights: {len(sumolib.net.readNet(str(net)).getTrafficLights())}")
-    if area in CALIB:
+    if (k := area.removesuffix("_tt")) in CALIB:
         print(f"calibration road peak flow: {flyover_flow(net, edges, AREAS[area]):,.0f} veh/h "
-              f"(target {CALIB[area][2]:,} PCU/h, {CALIB[area][1]})")
+              f"(target {CALIB[k][2]:,} PCU/h, {CALIB[k][1]})")
     print("\ntop study-box bottlenecks (time loss s, edge, name, speed/limit, occupancy %):")
     for tl, eid, name, ratio, occ in bottlenecks(net, edges, AREAS[area]):
         print(f"  {tl:>9,.0f}  {eid:<22} {name[:30]:<30} {ratio:5.2f}  {occ:5.1f}")
