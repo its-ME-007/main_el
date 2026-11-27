@@ -115,3 +115,8 @@ works unchanged with the alias. One simulation at a time, in a plain PowerShell 
 3. Compare: does the Hebbal winner (c11's junctions, 163095719#2-AddedOffRampNode -> 7304953142) and Baiyappanahalli's
    c22 (481741594 -> 2411848590) still win? The UI shows each alias as its own area (`?area=hebbal_tt`).
 `SPEEDS=tomtom` on the default area name is the quick check only (writes `data/<area>/sim_tomtom/`, baseline only).
+Shortcut (2026-11-27): `backend/run_tt_hebbal.ps1` and `backend/run_tt_baiyappanahalli.ps1` run all the steps above
+unattended (`powershell -ExecutionPolicy Bypass -File .\run_tt_hebbal.ps1`). Each logs START/END/INTERRUPTED to
+`data/overnight/tt_<area>_progress.txt`, records finished steps in `tt_<area>_done.txt` and resumes from there when
+rerun; a lock makes the second script wait for the first; top 10 and the winner are picked by `urban.pick`; the
+Baiyappanahalli script cuts demand 20 % (at most twice) if the baseline gridlocks.
