@@ -8,7 +8,9 @@ const RATES = [1, 5, 10, 30]
 const clock = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
 export default function TrafficPanel({ list, scene, keyOf }) {
-  const [run, setRun] = useState(null)        // null = animation off
+  // deep link ?traffic=<run>&t=<seconds into the window> (for screenshots and demos)
+  const q = new URLSearchParams(location.search)
+  const [run, setRun] = useState(q.get('traffic'))        // null = animation off
   const [loading, setLoading] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [rate, setRate] = useState(10)
@@ -30,7 +32,7 @@ export default function TrafficPanel({ list, scene, keyOf }) {
       const keepT = traffic.current?.t ?? 0    // switching run keeps the clock, so before/after line up
       traffic.current = s.setTraffic(d, tr => { setT(tr.t); setCount(tr.count); setUsed(tr.usedSoFar) }, keyOf(run))
       traffic.current.highlight = hl
-      traffic.current.t = Math.min(keepT, traffic.current.duration)
+      traffic.current.t = Math.min(q.has('t') && !keepT ? Number(q.get('t')) : keepT, traffic.current.duration)
       traffic.current.rate = rate
       traffic.current.playing = true
       setPlaying(true)

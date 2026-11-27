@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CityScene } from './scene.js'
-import { AREA, areaName, loadAll, loadComparison } from './data.js'
+import { AREA, AREA_SHORT, areaName, loadAll, loadAreas, loadComparison } from './data.js'
 import ResultsChart from './ResultsChart.jsx'
 import ParallelChart from './ParallelChart.jsx'
 import RunPanel from './RunPanel.jsx'
@@ -53,6 +53,7 @@ export default function App() {
   const [hover, setHover] = useState(null)
   const [road, setRoad] = useState(null)
   const [tab, setTab] = useState('ranking')
+  const [areas, setAreas] = useState({})   // data/areas.json: the study areas the switcher offers
   const [res, setRes] = useState(null)   // which results rank the list: 'macro' (fast screen) | 'micro' (validated)
   const [w, setW] = useState(DEFAULT_W)
 
@@ -94,6 +95,7 @@ export default function App() {
       },
     })
     sceneRef.current = s
+    loadAreas().then(setAreas)
     loadAll().then(d => {
       s.build(d, d.bbox)
       if (d.live) s.setLive(d.live.points, p => speedColor(p.ratio))
@@ -106,6 +108,8 @@ export default function App() {
       if (['after', 'change'].includes(q.get('view')) || (q.get('view') === 'live' && d.live)) setMode(q.get('view'))
       if (q.get('sim') === 'micro') setSimPref('micro')
       if (['chart', 'parallel', 'run'].includes(q.get('tab'))) setTab(q.get('tab'))
+      if (['macro', 'micro'].includes(q.get('res'))) setRes(q.get('res'))
+      if (q.get('view') === 'after') setMixVal(1)
     }).catch(e => setError(String(e.message || e)))
     return () => s.dispose()
   }, [])
@@ -190,13 +194,28 @@ export default function App() {
           <div className="brand"><span className="mark" />Urban infrastructure planner</div>
           <h1>{areaName(AREA)} Road Planner</h1>
           <p className="sub">Simulation-based evaluation of new road connections, {areaName(AREA)}, Bengaluru</p>
+          {Object.keys(areas).filter(a => a !== 'koramangala').length > 1 && (
+            <div className="area-switch">
+              <span className="muted small">Study area</span>
+              <div className="seg small">
+                {Object.keys(areas).filter(a => a !== 'koramangala').map(a => (
+                  // a full reload: every layer, result and animation belongs to one area
+                  <button key={a} className={a === AREA ? 'on' : ''} disabled={a === AREA}
+                          onClick={() => { location.search = `?area=${a}` }}
+                          title={areas[a].scenarios ? areaName(a) : `${areaName(a)}: map only, results not loaded yet`}>
+                    {AREA_SHORT[a] || areaName(a)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </header>
         {error && <div className="error">Could not load data: {error}<br />Run <code>uv run python -m urban.export {AREA}</code> in <code>backend/</code>.</div>}
         {!data && !error && <div className="muted">Loading city…</div>}
         {data && !scored.length && (
           <div className="notice">
-            <b>Not simulated yet.</b> The map and roads are real; traffic and candidate roads appear once the pipeline
-            has run for this area:
+            <b>Results for {areaName(AREA)} are not loaded yet.</b> The map, roads, buildings and no-build zones are
+            real; traffic, candidate roads, rankings and the animation appear here as soon as the results are exported:
             <code>{['sim', 'candidates', 'evaluate', 'export'].map(m => `uv run python -m urban.${m} ${AREA}`).join('\n')}</code>
           </div>
         )}

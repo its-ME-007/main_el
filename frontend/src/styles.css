@@ -253,3 +253,7 @@ details[open] > summary h2::before { transform: rotate(90deg); }
 .run summary { cursor: pointer; font-size: 12px; }
 .run-log { max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all;
   background: rgba(0, 0, 0, 0.25); padding: 8px; border-radius: 8px; color: var(--muted); }
+.area-switch { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.area-switch .seg { flex: 1; }
+.area-switch .seg button { flex: 1 1 auto; white-space: nowrap; padding: 6px 10px; }
+.area-switch button:disabled { cursor: default; opacity: 1; }

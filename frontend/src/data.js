@@ -4,7 +4,11 @@ export const AREA = new URLSearchParams(location.search).get('area') || 'hebbal'
 export const AREA_NAMES = { hebbal: 'Hebbal', koramangala: 'Koramangala', baiyappanahalli: 'Baiyappanahalli – Benniganahalli' }
 export const areaName = a => AREA_NAMES[a] || a
 // Fallback study boxes (west, south, east, north), same as AREAS in backend/urban/data.py
-const BBOXES = { hebbal: [77.5890, 13.0290, 77.6050, 13.0430] }
+const BBOXES = { hebbal: [77.5890, 13.0290, 77.6050, 13.0430], baiyappanahalli: [77.6500, 12.9850, 77.6720, 13.0030] }
+// short names for the area switcher
+export const AREA_SHORT = { hebbal: 'Hebbal', baiyappanahalli: 'Baiyappanahalli', koramangala: 'Koramangala' }
+// every exported area (data/areas.json), for the switcher; loaded on its own so it works even if one area fails
+export const loadAreas = () => fetch('/data/areas.json').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 
 const cache = new Map()
 
